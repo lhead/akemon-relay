@@ -189,7 +189,6 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 		Name            string  `json:"name"`
 		Avatar          string  `json:"avatar"`
 		Description     string  `json:"description"`
-		AccountID       string  `json:"account_id"`
 		Engine          string  `json:"engine"`
 		Status          string  `json:"status"`
 		Public          bool    `json:"public"`
@@ -212,7 +211,6 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 			Name:            a.Name,
 			Avatar:          a.Avatar,
 			Description:     a.Description,
-			AccountID:       a.AccountID,
 			Engine:          a.Engine,
 			Status:          status,
 			Public:          a.Public,
