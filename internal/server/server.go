@@ -31,6 +31,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/agent/{name}/mcp", s.handlePublisherMCP)
 	s.mux.HandleFunc("GET /v1/agents", s.handleListAgents)
 	s.mux.HandleFunc("GET /health", s.handleHealth)
+	s.mux.HandleFunc("GET /", s.handleIndex)
 }
 
 func (s *Server) Run(ctx context.Context) error {
