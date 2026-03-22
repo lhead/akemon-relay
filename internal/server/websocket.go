@@ -352,10 +352,10 @@ func (s *Server) routeAgentCallResult(responder *ConnectedAgent, msg *relay.Rela
 		log.Printf("[agent_call_result] send to %s failed: %v", callerName, err)
 	}
 
-	// Credits: callee earns, caller pays (skip if same account or error)
+	// Credits: callee earns, caller pays (skip on error only)
 	result := msg.Result
 	isError := strings.HasPrefix(result, "[error]")
-	if !isError && callerAgent.AccountID != responder.AccountID {
+	if !isError {
 		price := responder.Price
 		if price <= 0 {
 			price = 1
