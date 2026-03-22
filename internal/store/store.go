@@ -29,8 +29,14 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) Migrate() error {
-	_, err := s.db.Exec(schema)
-	return err
+	if _, err := s.db.Exec(schema); err != nil {
+		return err
+	}
+	// Idempotent column additions for existing databases
+	s.db.Exec(`ALTER TABLE agents ADD COLUMN tags TEXT DEFAULT ''`)
+	s.db.Exec(`ALTER TABLE agents ADD COLUMN credits INTEGER DEFAULT 100`)
+	s.db.Exec(`ALTER TABLE agents ADD COLUMN price INTEGER DEFAULT 1`)
+	return nil
 }
 
 // --- Accounts ---
@@ -76,6 +82,9 @@ type Agent struct {
 	TotalTasks      int
 	TotalUptimeS    int
 	LastConnected   *string
+	Tags            string // comma-separated
+	Credits         int
+	Price           int
 }
 
 func (s *Store) GetAgentByName(name string) (*Agent, error) {
@@ -84,12 +93,13 @@ func (s *Store) GetAgentByName(name string) (*Agent, error) {
 	err := s.db.QueryRow(`
 		SELECT id, name, account_id, secret_hash, access_hash, description,
 		       engine, avatar, public, max_tasks,
-		       first_registered, total_tasks, total_uptime_s, last_connected
+		       first_registered, total_tasks, total_uptime_s, last_connected,
+		       COALESCE(tags, ''), COALESCE(credits, 100), COALESCE(price, 1)
 		FROM agents WHERE name = ?
 	`, name).Scan(&a.ID, &a.Name, &a.AccountID, &a.SecretHash, &a.AccessHash,
 		&a.Description, &a.Engine, &a.Avatar, &pub, &a.MaxTasks,
 		&a.FirstRegistered, &a.TotalTasks, &a.TotalUptimeS,
-		&a.LastConnected)
+		&a.LastConnected, &a.Tags, &a.Credits, &a.Price)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -116,27 +126,56 @@ func (s *Store) CreateAgent(a *Agent) error {
 		a.Avatar = randomAvatar(a.Engine)
 	}
 	_, err := s.db.Exec(`
-		INSERT INTO agents (id, name, account_id, secret_hash, access_hash, description, engine, avatar, public, max_tasks, first_registered)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, a.ID, a.Name, a.AccountID, a.SecretHash, a.AccessHash, a.Description, a.Engine, a.Avatar, pub, a.MaxTasks, a.FirstRegistered)
+		INSERT INTO agents (id, name, account_id, secret_hash, access_hash, description, engine, avatar, public, max_tasks, first_registered, tags)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, a.ID, a.Name, a.AccountID, a.SecretHash, a.AccessHash, a.Description, a.Engine, a.Avatar, pub, a.MaxTasks, a.FirstRegistered, a.Tags)
 	return err
 }
 
-func (s *Store) UpdateAgentOnConnect(name, description, engine string, public bool) error {
+func (s *Store) UpdateAgentOnConnect(name, description, engine string, public bool, tags string) error {
 	pub := 0
 	if public {
 		pub = 1
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.db.Exec(`
-		UPDATE agents SET description = ?, engine = ?, public = ?, last_connected = ? WHERE name = ?
-	`, description, engine, pub, now, name)
+		UPDATE agents SET description = ?, engine = ?, public = ?, last_connected = ?, tags = ? WHERE name = ?
+	`, description, engine, pub, now, tags, name)
+	return err
+}
+
+func (s *Store) UpdateAgentPublic(name string, public bool) error {
+	pub := 0
+	if public {
+		pub = 1
+	}
+	_, err := s.db.Exec(`UPDATE agents SET public = ? WHERE name = ?`, pub, name)
 	return err
 }
 
 func (s *Store) IncrementAgentTasks(agentID string) error {
 	_, err := s.db.Exec(`UPDATE agents SET total_tasks = total_tasks + 1 WHERE id = ?`, agentID)
 	return err
+}
+
+// TransferCredits moves credits from caller to callee on successful call.
+// Returns (price, error). Caller is identified by publisherID → agent name lookup.
+func (s *Store) TransferCredits(calleeAgentID string) (int, error) {
+	// Get callee's price
+	var price int
+	err := s.db.QueryRow(`SELECT COALESCE(price, 1) FROM agents WHERE id = ?`, calleeAgentID).Scan(&price)
+	if err != nil {
+		return 0, err
+	}
+	// Credit the callee
+	_, err = s.db.Exec(`UPDATE agents SET credits = COALESCE(credits, 100) + ? WHERE id = ?`, price, calleeAgentID)
+	return price, err
+}
+
+func (s *Store) GetAgentCredits(name string) (int, error) {
+	var credits int
+	err := s.db.QueryRow(`SELECT COALESCE(credits, 100) FROM agents WHERE name = ?`, name).Scan(&credits)
+	return credits, err
 }
 
 type AgentListing struct {
@@ -154,6 +193,9 @@ type AgentListing struct {
 	AvgResponseMs   int     `json:"avg_response_ms"`
 	FirstRegistered string  `json:"first_registered"`
 	LastConnected   *string `json:"last_connected"`
+	Tags            string  `json:"tags"`
+	Credits         int     `json:"credits"`
+	Price           int     `json:"price"`
 }
 
 func computeLevel(successfulTasks int) int {
@@ -172,6 +214,7 @@ func (s *Store) ListAgents() ([]AgentListing, error) {
 		SELECT
 			a.name, a.description, a.account_id, a.engine, a.avatar,
 			a.public, a.max_tasks, a.total_tasks, a.first_registered, a.last_connected,
+			COALESCE(a.tags, ''), COALESCE(a.credits, 100), COALESCE(a.price, 1),
 			COALESCE((SELECT COUNT(*) FROM tasks t WHERE t.agent_id = a.id AND t.status = 'ok'), 0) as successful_tasks,
 			COALESCE((SELECT AVG(t.duration_ms) FROM tasks t WHERE t.agent_id = a.id AND t.status = 'ok'), 0) as avg_ms
 		FROM agents a
@@ -189,7 +232,7 @@ func (s *Store) ListAgents() ([]AgentListing, error) {
 		var avgMs float64
 		if err := rows.Scan(&a.Name, &a.Description, &a.AccountID, &a.Engine, &a.Avatar,
 			&pub, &a.MaxTasks, &a.TotalTasks, &a.FirstRegistered, &a.LastConnected,
-			&a.SuccessfulTasks, &avgMs); err != nil {
+			&a.Tags, &a.Credits, &a.Price, &a.SuccessfulTasks, &avgMs); err != nil {
 			return nil, err
 		}
 		a.Public = pub == 1
@@ -229,5 +272,33 @@ func (s *Store) RecordDisconnect(id, reason string) error {
 	_, err := s.db.Exec(`
 		UPDATE connections SET disconnected_at = ?, disconnect_reason = ? WHERE id = ?
 	`, now, reason, id)
+	return err
+}
+
+// --- Session Context ---
+
+const maxContextBytes = 8192
+
+func (s *Store) GetContext(agentName, sessionID string) (string, error) {
+	var ctx string
+	err := s.db.QueryRow(`
+		SELECT context FROM session_context WHERE agent_name = ? AND session_id = ?
+	`, agentName, sessionID).Scan(&ctx)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return ctx, err
+}
+
+func (s *Store) PutContext(agentName, sessionID, context string) error {
+	if len(context) > maxContextBytes {
+		context = context[len(context)-maxContextBytes:]
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.Exec(`
+		INSERT INTO session_context (agent_name, session_id, context, updated_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(agent_name, session_id) DO UPDATE SET context = ?, updated_at = ?
+	`, agentName, sessionID, context, now, context, now)
 	return err
 }

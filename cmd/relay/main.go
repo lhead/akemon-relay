@@ -18,7 +18,12 @@ func main() {
 
 	flag.StringVar(&cfg.Addr, "addr", cfg.Addr, "listen address")
 	flag.StringVar(&cfg.DBPath, "db", cfg.DBPath, "SQLite database path")
+	flag.StringVar(&cfg.AdminSecret, "admin-secret", "", "admin bearer token for protected endpoints")
 	flag.Parse()
+
+	if cfg.AdminSecret == "" {
+		cfg.AdminSecret = os.Getenv("ADMIN_SECRET")
+	}
 
 	db, err := store.Open(cfg.DBPath)
 	if err != nil {

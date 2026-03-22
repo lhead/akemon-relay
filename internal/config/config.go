@@ -11,6 +11,7 @@ type Config struct {
 	RequestTimeout  time.Duration // max time to wait for agent response
 	GracePeriod     time.Duration // name reservation after disconnect
 	MaxMessageBytes int64         // max WebSocket message size
+	AdminSecret     string        // bearer token for admin endpoints (e.g. PK trigger)
 }
 
 func Default() *Config {

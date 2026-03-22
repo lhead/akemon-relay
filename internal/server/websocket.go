@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/akemon/akemon-relay/internal/auth"
@@ -13,6 +14,17 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
+
+func joinTags(tags []string) string {
+	var clean []string
+	for _, t := range tags {
+		t = strings.TrimSpace(strings.ToLower(t))
+		if t != "" {
+			clean = append(clean, t)
+		}
+	}
+	return strings.Join(clean, ",")
+}
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
@@ -112,6 +124,7 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 		if engine == "" {
 			engine = "claude"
 		}
+		tags := joinTags(regMsg.Tags)
 		if err := s.relay.Store.CreateAgent(&store.Agent{
 			ID:              agentID,
 			Name:            name,
@@ -122,6 +135,7 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 			Engine:          engine,
 			Public:          regMsg.Public,
 			FirstRegistered: now,
+			Tags:            tags,
 		}); err != nil {
 			log.Printf("[ws] create agent error: %v", err)
 			sendError(conn, "failed to register agent (name may be taken)")
@@ -146,7 +160,8 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 		if reconnectEngine == "" {
 			reconnectEngine = "claude"
 		}
-		if err := s.relay.Store.UpdateAgentOnConnect(name, regMsg.Description, reconnectEngine, regMsg.Public); err != nil {
+		reconnectTags := joinTags(regMsg.Tags)
+		if err := s.relay.Store.UpdateAgentOnConnect(name, regMsg.Description, reconnectEngine, regMsg.Public, reconnectTags); err != nil {
 			log.Printf("[ws] update agent error: %v", err)
 		}
 		log.Printf("[ws] agent reconnected: %s", name)
@@ -166,6 +181,7 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if displaced != nil {
+		log.Printf("[ws] agent displaced: %s (old connection closed by same-account reconnect)", name)
 		displaced.FailAllPending("displaced by reconnect")
 		displaced.Conn.Close()
 	}
@@ -221,6 +237,14 @@ func (s *Server) agentLoop(agent *ConnectedAgent) {
 				if msg.RequestID != "" {
 					agent.ResolvePending(msg.RequestID, &msg)
 				}
+			case relay.TypeControlAck:
+				log.Printf("[ws] %s: control_ack action=%s", agent.Name, msg.Action)
+			case relay.TypeAgentCall:
+				// Agent wants to call another agent
+				s.handleAgentCallFromWS(agent, &msg)
+			case relay.TypeAgentCallResult:
+				// Agent returning result to a caller
+				s.routeAgentCallResult(agent, &msg)
 			default:
 				log.Printf("[ws] %s: unexpected message type: %s", agent.Name, msg.Type)
 			}
@@ -256,6 +280,71 @@ func (s *Server) agentLoop(agent *ConnectedAgent) {
 }
 
 type ConnectedAgent = relay.ConnectedAgent
+
+func (s *Server) handleAgentCallFromWS(caller *ConnectedAgent, msg *relay.RelayMessage) {
+	target := msg.Target
+	if target == "" || msg.CallID == "" {
+		log.Printf("[agent_call] %s: missing target or call_id", caller.Name)
+		return
+	}
+
+	targetAgent := s.relay.Registry.Get(target)
+	if targetAgent == nil {
+		// Target offline — send error back to caller
+		errMsg := &relay.RelayMessage{
+			Type:   relay.TypeAgentCallResult,
+			CallID: msg.CallID,
+			Caller: target,
+			Result: "[error] Agent " + target + " is offline",
+		}
+		caller.Send(errMsg)
+		return
+	}
+
+	// Forward to target, stamping caller name
+	fwd := &relay.RelayMessage{
+		Type:   relay.TypeAgentCall,
+		CallID: msg.CallID,
+		Caller: caller.Name,
+		Task:   msg.Task,
+	}
+	if err := targetAgent.Send(fwd); err != nil {
+		log.Printf("[agent_call] %s→%s: send failed: %v", caller.Name, target, err)
+		errMsg := &relay.RelayMessage{
+			Type:   relay.TypeAgentCallResult,
+			CallID: msg.CallID,
+			Caller: target,
+			Result: "[error] Failed to reach agent " + target,
+		}
+		caller.Send(errMsg)
+		return
+	}
+	log.Printf("[agent_call] %s → %s (call_id=%s)", caller.Name, target, msg.CallID)
+}
+
+func (s *Server) routeAgentCallResult(responder *ConnectedAgent, msg *relay.RelayMessage) {
+	callerName := msg.Caller
+	if callerName == "" || msg.CallID == "" {
+		return
+	}
+
+	callerAgent := s.relay.Registry.Get(callerName)
+	if callerAgent == nil {
+		log.Printf("[agent_call_result] caller %s is offline, dropping result", callerName)
+		return
+	}
+
+	fwd := &relay.RelayMessage{
+		Type:   relay.TypeAgentCallResult,
+		CallID: msg.CallID,
+		Caller: responder.Name,
+		Result: msg.Result,
+	}
+	if err := callerAgent.Send(fwd); err != nil {
+		log.Printf("[agent_call_result] send to %s failed: %v", callerName, err)
+	}
+	log.Printf("[agent_call_result] %s → %s (call_id=%s)", responder.Name, callerName, msg.CallID)
+}
 
 func sendError(conn *websocket.Conn, msg string) {
 	conn.WriteJSON(&relay.RelayMessage{
