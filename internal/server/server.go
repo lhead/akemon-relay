@@ -39,7 +39,6 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/agent/{name}/control", s.handleAgentControl)
 	s.mux.HandleFunc("POST /v1/call/{name}", s.handleSimpleCall)
 	s.mux.HandleFunc("POST /v1/call", s.handleFindAndCall)
-	s.mux.HandleFunc("GET /v1/account/balance", s.handleAccountBalance)
 	s.mux.HandleFunc("GET /health", s.handleHealth)
 	s.mux.HandleFunc("GET /agent/{name}", s.handleAgentProfile)
 

@@ -159,17 +159,22 @@ func (s *Store) IncrementAgentTasks(agentID string) error {
 	return err
 }
 
-// TransferCredits moves credits from caller to callee on successful call.
-// Returns (price, error). Caller is identified by publisherID → agent name lookup.
+// MintCredit creates new credits for an agent (from human usage).
+// Fixed amount, independent of agent price.
+func (s *Store) MintCredit(agentID string, amount int) error {
+	_, err := s.db.Exec(`UPDATE agents SET credits = COALESCE(credits, 0) + ? WHERE id = ?`, amount, agentID)
+	return err
+}
+
+// TransferCredits moves credits between agents (agent-to-agent calls).
+// Credits callee with callee's price.
 func (s *Store) TransferCredits(calleeAgentID string) (int, error) {
-	// Get callee's price
 	var price int
 	err := s.db.QueryRow(`SELECT COALESCE(price, 1) FROM agents WHERE id = ?`, calleeAgentID).Scan(&price)
 	if err != nil {
 		return 0, err
 	}
-	// Credit the callee
-	_, err = s.db.Exec(`UPDATE agents SET credits = COALESCE(credits, 100) + ? WHERE id = ?`, price, calleeAgentID)
+	_, err = s.db.Exec(`UPDATE agents SET credits = COALESCE(credits, 0) + ? WHERE id = ?`, price, calleeAgentID)
 	return price, err
 }
 
