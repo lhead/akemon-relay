@@ -172,7 +172,15 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[ws] record connect error: %v", err)
 	}
 
-	agent := relay.NewConnectedAgent(name, agentID, accountID, accessHash, regMsg.Public, conn, connID)
+	// Get price from DB
+	agentPrice := 1
+	if dbAg, err := s.relay.Store.GetAgentByName(name); err == nil && dbAg != nil {
+		agentPrice = dbAg.Price
+		if agentPrice <= 0 {
+			agentPrice = 1
+		}
+	}
+	agent := relay.NewConnectedAgent(name, agentID, accountID, accessHash, regMsg.Public, agentPrice, conn, connID)
 
 	// Register in memory
 	displaced, errMsg := s.relay.Registry.Register(agent, s.config.GracePeriod)
@@ -343,6 +351,20 @@ func (s *Server) routeAgentCallResult(responder *ConnectedAgent, msg *relay.Rela
 	if err := callerAgent.Send(fwd); err != nil {
 		log.Printf("[agent_call_result] send to %s failed: %v", callerName, err)
 	}
+
+	// Credits: callee earns, caller pays (skip if same account or error)
+	result := msg.Result
+	isError := strings.HasPrefix(result, "[error]")
+	if !isError && callerAgent.AccountID != responder.AccountID {
+		price := responder.Price
+		if price <= 0 {
+			price = 1
+		}
+		s.relay.Store.TransferCredits(responder.AgentID)
+		s.relay.Store.DebitAgent(callerAgent.AgentID, price)
+		log.Printf("[credits] agent %s paid %d to %s", callerName, price, responder.Name)
+	}
+
 	log.Printf("[agent_call_result] %s → %s (call_id=%s)", responder.Name, callerName, msg.CallID)
 }
 

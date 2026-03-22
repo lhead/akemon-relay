@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS agents (
     total_uptime_s   INTEGER DEFAULT 0,
     last_connected   TEXT,
     tags             TEXT DEFAULT '',
-    credits          INTEGER DEFAULT 100,
+    credits          INTEGER DEFAULT 0,
     price            INTEGER DEFAULT 1
 );
 

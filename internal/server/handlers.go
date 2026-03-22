@@ -147,11 +147,12 @@ func (s *Server) handlePublisherMCP(w http.ResponseWriter, r *http.Request) {
 	if err := s.relay.Store.IncrementAgentTasks(agent.AgentID); err != nil {
 		log.Printf("[mcp] increment tasks error: %v", err)
 	}
-	// Credits: callee earns on success, no charge on failure
+	// Credits: callee earns on success, try debit caller
 	if status == "ok" {
 		if price, err := s.relay.Store.TransferCredits(agent.AgentID); err == nil {
 			log.Printf("[credits] %s earned %d credits", agentName, price)
 		}
+		s.tryDebitCaller(r, agent, agent.Price)
 	}
 
 	// Write response back to publisher
@@ -351,6 +352,67 @@ func clientIP(r *http.Request) string {
 		return xff
 	}
 	return r.RemoteAddr
+}
+
+// --- Credits: caller debit helper ---
+
+// tryDebitCaller checks X-Account-Id + X-Account-Secret headers.
+// If valid and different from target agent's account, debits the caller.
+// Returns callerAccountID (empty if anonymous).
+func (s *Server) tryDebitCaller(r *http.Request, targetAgent *relay.ConnectedAgent, agentPrice int) string {
+	callerAccountID := r.Header.Get("X-Account-Id")
+	callerSecret := r.Header.Get("X-Account-Secret")
+	if callerAccountID == "" || callerSecret == "" {
+		return "" // anonymous, no debit
+	}
+
+	// Same account → free (your own agent)
+	if callerAccountID == targetAgent.AccountID {
+		return callerAccountID
+	}
+
+	// Verify caller's secret key
+	callerAgent, err := s.relay.Store.GetAnyAgentByAccount(callerAccountID)
+	if err != nil || callerAgent == nil {
+		return "" // account not found, treat as anonymous
+	}
+	if !auth.VerifyToken(callerSecret, callerAgent.SecretHash) {
+		return "" // bad secret, treat as anonymous
+	}
+
+	// Debit caller account
+	if err := s.relay.Store.DebitAccount(callerAccountID, agentPrice); err != nil {
+		log.Printf("[credits] debit account %s failed: %v", callerAccountID[:8], err)
+	} else {
+		log.Printf("[credits] account %s paid %d credits", callerAccountID[:8], agentPrice)
+	}
+	return callerAccountID
+}
+
+// --- Account Balance ---
+
+func (s *Server) handleAccountBalance(w http.ResponseWriter, r *http.Request) {
+	accountID := r.Header.Get("X-Account-Id")
+	secret := auth.ExtractBearer(r)
+	if accountID == "" || secret == "" {
+		jsonError(w, "X-Account-Id header and Authorization: Bearer <secret_key> required", http.StatusUnauthorized)
+		return
+	}
+	callerAgent, err := s.relay.Store.GetAnyAgentByAccount(accountID)
+	if err != nil || callerAgent == nil {
+		jsonError(w, "account not found", http.StatusNotFound)
+		return
+	}
+	if !auth.VerifyToken(secret, callerAgent.SecretHash) {
+		jsonError(w, "invalid secret key", http.StatusUnauthorized)
+		return
+	}
+	credits, _ := s.relay.Store.GetAccountCredits(accountID)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"account_id": accountID,
+		"credits":    credits,
+	})
 }
 
 // --- Session Context API ---
@@ -623,6 +685,7 @@ func (s *Server) handleSimpleCall(w http.ResponseWriter, r *http.Request) {
 	s.relay.Store.IncrementAgentTasks(agent.AgentID)
 	if status == "ok" {
 		s.relay.Store.TransferCredits(agent.AgentID)
+		s.tryDebitCaller(r, agent, agent.Price)
 	}
 
 	if callResp.Type == relay.TypeMCPError {
@@ -630,7 +693,6 @@ func (s *Server) handleSimpleCall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract text result from JSON-RPC response
 	result := extractTextResult(callResp.Body)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -861,6 +923,7 @@ func (s *Server) handleFindAndCall(w http.ResponseWriter, r *http.Request) {
 	s.relay.Store.IncrementAgentTasks(agent.AgentID)
 	if status == "ok" {
 		s.relay.Store.TransferCredits(agent.AgentID)
+		s.tryDebitCaller(r, agent, agent.Price)
 	}
 
 	if callResp.Type == relay.TypeMCPError {

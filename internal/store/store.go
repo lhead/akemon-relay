@@ -34,8 +34,9 @@ func (s *Store) Migrate() error {
 	}
 	// Idempotent column additions for existing databases
 	s.db.Exec(`ALTER TABLE agents ADD COLUMN tags TEXT DEFAULT ''`)
-	s.db.Exec(`ALTER TABLE agents ADD COLUMN credits INTEGER DEFAULT 100`)
+	s.db.Exec(`ALTER TABLE agents ADD COLUMN credits INTEGER DEFAULT 0`)
 	s.db.Exec(`ALTER TABLE agents ADD COLUMN price INTEGER DEFAULT 1`)
+	s.db.Exec(`ALTER TABLE accounts ADD COLUMN credits INTEGER DEFAULT 100`)
 	return nil
 }
 
@@ -174,8 +175,54 @@ func (s *Store) TransferCredits(calleeAgentID string) (int, error) {
 
 func (s *Store) GetAgentCredits(name string) (int, error) {
 	var credits int
-	err := s.db.QueryRow(`SELECT COALESCE(credits, 100) FROM agents WHERE name = ?`, name).Scan(&credits)
+	err := s.db.QueryRow(`SELECT COALESCE(credits, 0) FROM agents WHERE name = ?`, name).Scan(&credits)
 	return credits, err
+}
+
+// DebitAgent subtracts credits from an agent (for agent-to-agent calls).
+func (s *Store) DebitAgent(agentID string, amount int) error {
+	_, err := s.db.Exec(`UPDATE agents SET credits = COALESCE(credits, 0) - ? WHERE id = ?`, amount, agentID)
+	return err
+}
+
+// --- Account Credits ---
+
+func (s *Store) GetAccountCredits(accountID string) (int, error) {
+	var credits int
+	err := s.db.QueryRow(`SELECT COALESCE(credits, 100) FROM accounts WHERE id = ?`, accountID).Scan(&credits)
+	if err == sql.ErrNoRows {
+		return 100, nil
+	}
+	return credits, err
+}
+
+func (s *Store) DebitAccount(accountID string, amount int) error {
+	_, err := s.db.Exec(`UPDATE accounts SET credits = COALESCE(credits, 100) - ? WHERE id = ?`, amount, accountID)
+	return err
+}
+
+// GetAnyAgentByAccount returns one agent for the given account (for secret key verification).
+func (s *Store) GetAnyAgentByAccount(accountID string) (*Agent, error) {
+	a := &Agent{}
+	var pub int
+	err := s.db.QueryRow(`
+		SELECT id, name, account_id, secret_hash, access_hash, description,
+		       engine, avatar, public, max_tasks,
+		       first_registered, total_tasks, total_uptime_s, last_connected,
+		       COALESCE(tags, ''), COALESCE(credits, 0), COALESCE(price, 1)
+		FROM agents WHERE account_id = ? LIMIT 1
+	`, accountID).Scan(&a.ID, &a.Name, &a.AccountID, &a.SecretHash, &a.AccessHash,
+		&a.Description, &a.Engine, &a.Avatar, &pub, &a.MaxTasks,
+		&a.FirstRegistered, &a.TotalTasks, &a.TotalUptimeS,
+		&a.LastConnected, &a.Tags, &a.Credits, &a.Price)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	a.Public = pub == 1
+	return a, nil
 }
 
 type AgentListing struct {

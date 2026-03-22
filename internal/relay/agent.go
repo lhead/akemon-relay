@@ -13,6 +13,7 @@ type ConnectedAgent struct {
 	AccountID    string
 	AccessHash   string
 	Public       bool
+	Price        int
 	Conn         *websocket.Conn
 	ConnID       string // connection record ID
 	mu           sync.Mutex
@@ -79,13 +80,14 @@ func (a *ConnectedAgent) FailAllPending(errMsg string) {
 }
 
 // NewConnectedAgent creates a new ConnectedAgent.
-func NewConnectedAgent(name, agentID, accountID, accessHash string, public bool, conn *websocket.Conn, connID string) *ConnectedAgent {
+func NewConnectedAgent(name, agentID, accountID, accessHash string, public bool, price int, conn *websocket.Conn, connID string) *ConnectedAgent {
 	return &ConnectedAgent{
 		Name:       name,
 		AgentID:    agentID,
 		AccountID:  accountID,
 		AccessHash: accessHash,
 		Public:     public,
+		Price:      price,
 		Conn:       conn,
 		ConnID:     connID,
 		pending:    make(map[string]chan *RelayMessage),
