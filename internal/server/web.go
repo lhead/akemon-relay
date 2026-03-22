@@ -47,6 +47,9 @@ header p{color:#555;margin-top:0.25rem;font-size:0.9rem}
 .st-v{font-size:0.9rem;font-weight:600}
 
 .desc{font-size:0.8rem;color:#777;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.tags{display:flex;flex-wrap:wrap;gap:0.3rem;margin-bottom:0.5rem}
+.tag{font-size:0.65rem;padding:2px 6px;background:#1a1a2e;border:1px solid #2a2a4e;border-radius:4px;color:#8888cc}
+.credits{font-size:0.7rem;color:#ffd700;font-weight:600}
 
 .overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:100;align-items:center;justify-content:center;padding:1rem}
 .overlay.open{display:flex}
@@ -178,8 +181,13 @@ function renderCards() {
     h += '<div class="st"><div class="st-l">LVL</div><div class="st-v">' + (a.level || 1) + '</div></div>';
     h += '<div class="st"><div class="st-l">SPD</div><div class="st-v">' + spd(a.avg_response_ms) + '</div></div>';
     h += '<div class="st"><div class="st-l">REL</div><div class="st-v">' + rel(a.success_rate) + '</div></div>';
-    h += '<div class="st"><div class="st-l">Tasks</div><div class="st-v">' + (a.total_tasks || 0) + '</div></div>';
+    h += '<div class="st"><div class="st-l">\u00A2</div><div class="st-v credits">' + (a.credits || 100) + '</div></div>';
     h += '</div>';
+    if (a.tags && a.tags.length) {
+      h += '<div class="tags">';
+      for (var t = 0; t < a.tags.length; t++) h += '<span class="tag">' + esc(a.tags[t]) + '</span>';
+      h += '</div>';
+    }
     if (a.description) h += '<div class="desc">' + esc(a.description) + '</div>';
     h += '</div>';
   }
@@ -475,13 +483,21 @@ function renderProfile(a) {
   h += '</div>';
   h += '</div>';
   if (a.description) h += '<div class="desc">' + esc(a.description) + '</div>';
+  if (a.tags && a.tags.length) {
+    h += '<div class="tags" style="margin-top:0.5rem">';
+    for (var t = 0; t < a.tags.length; t++) h += '<span class="tag">' + esc(a.tags[t]) + '</span>';
+    h += '</div>';
+  }
   h += '<div class="stats">';
   h += '<div class="st"><div class="st-l">LVL</div><div class="st-v">' + (a.level || 1) + '</div></div>';
   h += '<div class="st"><div class="st-l">SPD</div><div class="st-v">' + spd(a.avg_response_ms) + '</div></div>';
   h += '<div class="st"><div class="st-l">REL</div><div class="st-v">' + rel(a.success_rate) + '</div></div>';
   h += '<div class="st"><div class="st-l">Tasks</div><div class="st-v">' + (a.total_tasks || 0) + '</div></div>';
+  h += '<div class="st"><div class="st-l">Credits</div><div class="st-v credits">' + (a.credits || 100) + '</div></div>';
+  h += '<div class="st"><div class="st-l">Price</div><div class="st-v">' + (a.price || 1) + '</div></div>';
   h += '</div>';
-  if (a.registered_at) h += '<div class="meta">Registered: ' + esc(a.registered_at.split('T')[0]) + '</div>';
+  var regDate = a.first_registered || a.registered_at || '';
+  if (regDate) h += '<div class="meta">Registered: ' + esc(regDate.split('T')[0]) + '</div>';
   h += '</div>';
 
   h += '<div class="form-section">';
