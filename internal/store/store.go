@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"fmt"
 	"math"
 	"time"
 
@@ -162,7 +163,14 @@ func (s *Store) UpdateAgentPublic(name string, public bool) error {
 }
 
 func (s *Store) DeleteAgent(name string) error {
-	_, err := s.db.Exec(`DELETE FROM agents WHERE name = ?`, name)
+	agent, err := s.GetAgentByName(name)
+	if err != nil || agent == nil {
+		return fmt.Errorf("agent not found")
+	}
+	// Delete related records first (FK constraints)
+	s.db.Exec(`DELETE FROM tasks WHERE agent_id = ?`, agent.ID)
+	s.db.Exec(`DELETE FROM connections WHERE agent_id = ?`, agent.ID)
+	_, err = s.db.Exec(`DELETE FROM agents WHERE id = ?`, agent.ID)
 	return err
 }
 
