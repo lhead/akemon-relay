@@ -409,7 +409,8 @@ func (s *Server) handleAgentControl(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Action string `json:"action"` // shutdown, set_public, set_private
+		Action string `json:"action"` // shutdown, set_public, set_private, set_price
+		Price  int    `json:"price,omitempty"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
@@ -417,10 +418,10 @@ func (s *Server) handleAgentControl(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch req.Action {
-	case "shutdown", "set_public", "set_private":
+	case "shutdown", "set_public", "set_private", "set_price":
 		// ok
 	default:
-		http.Error(w, `{"error":"unknown action, supported: shutdown, set_public, set_private"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"unknown action, supported: shutdown, set_public, set_private, set_price"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -440,6 +441,26 @@ func (s *Server) handleAgentControl(w http.ResponseWriter, r *http.Request) {
 		// Update in-memory agent state
 		if agent := s.relay.Registry.Get(agentName); agent != nil {
 			agent.Public = isPublic
+		}
+	}
+
+	// Handle price change
+	if req.Action == "set_price" {
+		price := req.Price
+		if price < 1 {
+			price = 1
+		}
+		if price > 10000 {
+			price = 10000
+		}
+		if err := s.relay.Store.UpdateAgentPrice(agentName, price); err != nil {
+			log.Printf("[control] update price error: %v", err)
+			http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+			return
+		}
+		// Update in-memory
+		if a := s.relay.Registry.Get(agentName); a != nil {
+			a.Price = price
 		}
 	}
 

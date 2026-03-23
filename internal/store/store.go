@@ -95,7 +95,7 @@ func (s *Store) GetAgentByName(name string) (*Agent, error) {
 		SELECT id, name, account_id, secret_hash, access_hash, description,
 		       engine, avatar, public, max_tasks,
 		       first_registered, total_tasks, total_uptime_s, last_connected,
-		       COALESCE(tags, ''), COALESCE(credits, 100), COALESCE(price, 1)
+		       COALESCE(tags, ''), COALESCE(credits, 0), COALESCE(price, 1)
 		FROM agents WHERE name = ?
 	`, name).Scan(&a.ID, &a.Name, &a.AccountID, &a.SecretHash, &a.AccessHash,
 		&a.Description, &a.Engine, &a.Avatar, &pub, &a.MaxTasks,
@@ -126,22 +126,29 @@ func (s *Store) CreateAgent(a *Agent) error {
 	if a.Avatar == "" {
 		a.Avatar = randomAvatar(a.Engine)
 	}
+	price := a.Price
+	if price <= 0 {
+		price = 1
+	}
 	_, err := s.db.Exec(`
-		INSERT INTO agents (id, name, account_id, secret_hash, access_hash, description, engine, avatar, public, max_tasks, first_registered, tags)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, a.ID, a.Name, a.AccountID, a.SecretHash, a.AccessHash, a.Description, a.Engine, a.Avatar, pub, a.MaxTasks, a.FirstRegistered, a.Tags)
+		INSERT INTO agents (id, name, account_id, secret_hash, access_hash, description, engine, avatar, public, max_tasks, first_registered, tags, price)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, a.ID, a.Name, a.AccountID, a.SecretHash, a.AccessHash, a.Description, a.Engine, a.Avatar, pub, a.MaxTasks, a.FirstRegistered, a.Tags, price)
 	return err
 }
 
-func (s *Store) UpdateAgentOnConnect(name, description, engine string, public bool, tags string) error {
+func (s *Store) UpdateAgentOnConnect(name, description, engine string, public bool, tags string, price int) error {
 	pub := 0
 	if public {
 		pub = 1
 	}
+	if price <= 0 {
+		price = 1
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.db.Exec(`
-		UPDATE agents SET description = ?, engine = ?, public = ?, last_connected = ?, tags = ? WHERE name = ?
-	`, description, engine, pub, now, tags, name)
+		UPDATE agents SET description = ?, engine = ?, public = ?, last_connected = ?, tags = ?, price = ? WHERE name = ?
+	`, description, engine, pub, now, tags, price, name)
 	return err
 }
 
@@ -151,6 +158,11 @@ func (s *Store) UpdateAgentPublic(name string, public bool) error {
 		pub = 1
 	}
 	_, err := s.db.Exec(`UPDATE agents SET public = ? WHERE name = ?`, pub, name)
+	return err
+}
+
+func (s *Store) UpdateAgentPrice(name string, price int) error {
+	_, err := s.db.Exec(`UPDATE agents SET price = ? WHERE name = ?`, price, name)
 	return err
 }
 
@@ -194,7 +206,7 @@ func (s *Store) DebitAgent(agentID string, amount int) error {
 
 func (s *Store) GetAccountCredits(accountID string) (int, error) {
 	var credits int
-	err := s.db.QueryRow(`SELECT COALESCE(credits, 100) FROM accounts WHERE id = ?`, accountID).Scan(&credits)
+	err := s.db.QueryRow(`SELECT COALESCE(credits, 0) FROM accounts WHERE id = ?`, accountID).Scan(&credits)
 	if err == sql.ErrNoRows {
 		return 100, nil
 	}
@@ -202,7 +214,7 @@ func (s *Store) GetAccountCredits(accountID string) (int, error) {
 }
 
 func (s *Store) DebitAccount(accountID string, amount int) error {
-	_, err := s.db.Exec(`UPDATE accounts SET credits = COALESCE(credits, 100) - ? WHERE id = ?`, amount, accountID)
+	_, err := s.db.Exec(`UPDATE accounts SET credits = COALESCE(credits, 0) - ? WHERE id = ?`, amount, accountID)
 	return err
 }
 

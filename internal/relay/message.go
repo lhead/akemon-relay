@@ -15,6 +15,7 @@ const (
 	TypeControlAck      = "control_ack"
 	TypeAgentCall       = "agent_call"
 	TypeAgentCallResult = "agent_call_result"
+	TypeSetPrice        = "set_price"
 )
 
 // RelayMessage is the envelope for all WebSocket communication.
@@ -40,6 +41,9 @@ type RelayMessage struct {
 	Public      bool     `json:"public,omitempty"`
 	Engine      string   `json:"engine,omitempty"`
 	Tags        []string `json:"tags,omitempty"`
+
+	// Price field (used in set_price and registration)
+	Price int `json:"price,omitempty"`
 
 	// Control fields
 	Action string `json:"action,omitempty"` // shutdown, set_public, set_private

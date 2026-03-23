@@ -124,6 +124,10 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 		if engine == "" {
 			engine = "claude"
 		}
+		regPrice := regMsg.Price
+		if regPrice <= 0 {
+			regPrice = 1
+		}
 		tags := joinTags(regMsg.Tags)
 		if err := s.relay.Store.CreateAgent(&store.Agent{
 			ID:              agentID,
@@ -136,6 +140,7 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 			Public:          regMsg.Public,
 			FirstRegistered: now,
 			Tags:            tags,
+			Price:           regPrice,
 		}); err != nil {
 			log.Printf("[ws] create agent error: %v", err)
 			sendError(conn, "failed to register agent (name may be taken)")
@@ -161,7 +166,11 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 			reconnectEngine = "claude"
 		}
 		reconnectTags := joinTags(regMsg.Tags)
-		if err := s.relay.Store.UpdateAgentOnConnect(name, regMsg.Description, reconnectEngine, regMsg.Public, reconnectTags); err != nil {
+		reconnectPrice := regMsg.Price
+		if reconnectPrice <= 0 {
+			reconnectPrice = 1
+		}
+		if err := s.relay.Store.UpdateAgentOnConnect(name, regMsg.Description, reconnectEngine, regMsg.Public, reconnectTags, reconnectPrice); err != nil {
 			log.Printf("[ws] update agent error: %v", err)
 		}
 		log.Printf("[ws] agent reconnected: %s", name)
@@ -247,6 +256,20 @@ func (s *Server) agentLoop(agent *ConnectedAgent) {
 				}
 			case relay.TypeControlAck:
 				log.Printf("[ws] %s: control_ack action=%s", agent.Name, msg.Action)
+			case relay.TypeSetPrice:
+				newPrice := msg.Price
+				if newPrice < 1 {
+					newPrice = 1
+				}
+				if newPrice > 10000 {
+					newPrice = 10000
+				}
+				agent.Price = newPrice
+				if err := s.relay.Store.UpdateAgentPrice(agent.Name, newPrice); err != nil {
+					log.Printf("[ws] %s: set_price db error: %v", agent.Name, err)
+				} else {
+					log.Printf("[ws] %s: price updated to %d", agent.Name, newPrice)
+				}
 			case relay.TypeAgentCall:
 				// Agent wants to call another agent
 				s.handleAgentCallFromWS(agent, &msg)

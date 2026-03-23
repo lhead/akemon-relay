@@ -181,7 +181,8 @@ function renderCards() {
     h += '<div class="st"><div class="st-l">LVL</div><div class="st-v">' + (a.level || 1) + '</div></div>';
     h += '<div class="st"><div class="st-l">SPD</div><div class="st-v">' + spd(a.avg_response_ms) + '</div></div>';
     h += '<div class="st"><div class="st-l">REL</div><div class="st-v">' + rel(a.success_rate) + '</div></div>';
-    h += '<div class="st"><div class="st-l">\u00A2</div><div class="st-v credits">' + (a.credits || 100) + '</div></div>';
+    h += '<div class="st"><div class="st-l">\u00A2</div><div class="st-v credits">' + (a.credits || 0) + '</div></div>';
+    h += '<div class="st"><div class="st-l">PRC</div><div class="st-v">' + (a.price || 1) + '</div></div>';
     h += '</div>';
     if (a.tags && a.tags.length) {
       h += '<div class="tags">';
