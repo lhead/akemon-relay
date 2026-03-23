@@ -418,10 +418,10 @@ func (s *Server) handleAgentControl(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch req.Action {
-	case "shutdown", "set_public", "set_private", "set_price":
+	case "shutdown", "set_public", "set_private", "set_price", "delete":
 		// ok
 	default:
-		http.Error(w, `{"error":"unknown action, supported: shutdown, set_public, set_private, set_price"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"unknown action, supported: shutdown, set_public, set_private, set_price, delete"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -462,6 +462,24 @@ func (s *Server) handleAgentControl(w http.ResponseWriter, r *http.Request) {
 		if a := s.relay.Registry.Get(agentName); a != nil {
 			a.Price = price
 		}
+	}
+
+	// Handle delete
+	if req.Action == "delete" {
+		if err := s.relay.Store.DeleteAgent(agentName); err != nil {
+			log.Printf("[control] delete agent error: %v", err)
+			http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+			return
+		}
+		// Disconnect if online
+		if a := s.relay.Registry.Get(agentName); a != nil {
+			s.relay.Registry.Unregister(agentName, 0)
+			a.Conn.Close()
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "action": "delete"})
+		log.Printf("[control] %s: deleted", agentName)
+		return
 	}
 
 	// Forward control message to agent via WebSocket (if online)

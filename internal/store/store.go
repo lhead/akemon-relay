@@ -161,6 +161,11 @@ func (s *Store) UpdateAgentPublic(name string, public bool) error {
 	return err
 }
 
+func (s *Store) DeleteAgent(name string) error {
+	_, err := s.db.Exec(`DELETE FROM agents WHERE name = ?`, name)
+	return err
+}
+
 func (s *Store) UpdateAgentPrice(name string, price int) error {
 	_, err := s.db.Exec(`UPDATE agents SET price = ? WHERE name = ?`, price, name)
 	return err
