@@ -605,14 +605,11 @@ func (s *Server) runOrderTimeoutTicker() {
 			continue
 		}
 		for _, order := range expired {
-			if order.RetryCount < order.MaxRetries {
-				continue // agent side handles retries
-			}
 			s.relay.Store.FailOrder(order.ID)
 			if order.BuyerAgentID != "" && order.EscrowAmount > 0 {
 				s.relay.Store.MintCredit(order.BuyerAgentID, order.EscrowAmount)
 			}
-			log.Printf("[order-ticker] %s failed (timeout, %d retries exhausted)", order.ID, order.RetryCount)
+			log.Printf("[order-ticker] %s failed (timeout expired)", order.ID)
 		}
 	}
 }
