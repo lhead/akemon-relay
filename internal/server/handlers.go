@@ -1486,6 +1486,7 @@ func (s *Server) handleBuyProduct(w http.ResponseWriter, r *http.Request) {
 		BuyerIP:         clientIP(r),
 		BuyerTask:       req.Task,
 		TotalPrice:      product.Price,
+		HumanOrigin:     req.BuyerAgentID == "",
 	}
 	if err := s.relay.Store.CreateOrder(order); err != nil {
 		log.Printf("[buy] create order error: %v", err)
@@ -1523,12 +1524,12 @@ func (s *Server) handleAcceptOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Escrow: debit buyer credits (if agent buyer)
+	// Escrow: debit buyer credits (if agent buyer), skip for human-origin chain
 	price := order.TotalPrice
 	if order.OfferPrice > 0 {
 		price = order.OfferPrice
 	}
-	if order.BuyerAgentID != "" && price > 0 {
+	if order.BuyerAgentID != "" && price > 0 && !order.HumanOrigin {
 		if err := s.relay.Store.DebitAgent(order.BuyerAgentID, price); err != nil {
 			jsonError(w, "buyer has insufficient credits", http.StatusPaymentRequired)
 			return
@@ -1536,7 +1537,11 @@ func (s *Server) handleAcceptOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Accept with 30 minute timeout
-	if err := s.relay.Store.AcceptOrder(orderID, price, 30); err != nil {
+	escrow := price
+	if order.HumanOrigin {
+		escrow = 0
+	}
+	if err := s.relay.Store.AcceptOrder(orderID, escrow, 30); err != nil {
 		jsonError(w, "failed to accept order", http.StatusInternalServerError)
 		return
 	}
@@ -1546,9 +1551,9 @@ func (s *Server) handleAcceptOrder(w http.ResponseWriter, r *http.Request) {
 		"ok":       true,
 		"order_id": orderID,
 		"status":   "processing",
-		"escrow":   price,
+		"escrow":   escrow,
 	})
-	log.Printf("[order] %s accepted, escrow=%d", orderID, price)
+	log.Printf("[order] %s accepted, escrow=%d, human_origin=%v", orderID, escrow, order.HumanOrigin)
 }
 
 // handleDeliverOrder: seller delivers result (processing → completed)
@@ -1644,6 +1649,20 @@ func (s *Server) handleGetOrder(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(order)
 }
 
+func (s *Server) handleListChildOrders(w http.ResponseWriter, r *http.Request) {
+	orderID := r.PathValue("id")
+	children, err := s.relay.Store.ListChildOrders(orderID)
+	if err != nil {
+		jsonError(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if children == nil {
+		children = []*store.Order{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(children)
+}
+
 // handleListIncomingOrders: seller's pending + processing orders
 func (s *Server) handleListIncomingOrders(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
@@ -1716,6 +1735,14 @@ func (s *Server) handleCreateAdHocOrder(w http.ResponseWriter, r *http.Request) 
 		price = targetAgent.Price
 	}
 
+	// Determine human_origin: direct human request (no buyer agent) or inherited from parent
+	humanOrigin := req.BuyerAgentID == ""
+	if !humanOrigin && req.ParentOrderID != "" {
+		if parent, _ := s.relay.Store.GetOrder(req.ParentOrderID); parent != nil && parent.HumanOrigin {
+			humanOrigin = true
+		}
+	}
+
 	orderID := uuid.New().String()
 	order := &store.Order{
 		ID:              orderID,
@@ -1727,6 +1754,7 @@ func (s *Server) handleCreateAdHocOrder(w http.ResponseWriter, r *http.Request) 
 		ParentOrderID:   req.ParentOrderID,
 		TotalPrice:      price,
 		OfferPrice:      price,
+		HumanOrigin:     humanOrigin,
 	}
 	if err := s.relay.Store.CreateOrder(order); err != nil {
 		jsonError(w, "internal error", http.StatusInternalServerError)
@@ -1739,7 +1767,7 @@ func (s *Server) handleCreateAdHocOrder(w http.ResponseWriter, r *http.Request) 
 		"status":   "pending",
 		"agent":    targetAgent.Name,
 	})
-	log.Printf("[order] ad-hoc order %s created: %s → %s, offer=%d", orderID, req.BuyerAgentID, targetAgent.Name, req.OfferPrice)
+	log.Printf("[order] ad-hoc order %s created: %s → %s, offer=%d, human_origin=%v", orderID, req.BuyerAgentID, targetAgent.Name, req.OfferPrice, humanOrigin)
 }
 
 // handleCancelOrder: cancel an order

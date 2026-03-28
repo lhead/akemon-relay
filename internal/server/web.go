@@ -2053,10 +2053,23 @@ var ORDER_ID = '__ORDER_ID__';
 function esc(s) { if (!s) return ''; var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 function fmtTime(t) { return t ? t.replace('T', ' ').replace(/\.\d+Z$/, ' UTC').replace('Z', ' UTC') : ''; }
 
+function statusColor(s) {
+  if (s === 'completed') return '#00d4aa';
+  if (s === 'processing') return '#4da6ff';
+  if (s === 'pending') return '#aa8800';
+  if (s === 'failed') return '#ff6644';
+  return '#555';
+}
+
 function load() {
-  fetch('/v1/orders/' + ORDER_ID)
-  .then(function(r) { if (!r.ok) throw new Error('not found'); return r.json(); })
-  .then(function(o) {
+  Promise.all([
+    fetch('/v1/orders/' + ORDER_ID).then(function(r) { if (!r.ok) throw new Error('not found'); return r.json(); }),
+    fetch('/v1/orders/' + ORDER_ID + '/children').then(function(r) { return r.ok ? r.json() : []; }).catch(function() { return []; })
+  ])
+  .then(function(results) {
+    var o = results[0];
+    var children = results[1] || [];
+
     var h = '<div class="card">';
     h += '<div class="order-id">Order #' + esc(o.id) + '</div>';
     h += '<div class="order-title">';
@@ -2076,13 +2089,58 @@ function load() {
       h += '<div class="result-box">' + esc(o.buyer_task) + '</div>';
     }
 
+    // Build unified timeline events
+    var events = [];
+    if (o.created_at) events.push({time: o.created_at, type: 'done', label: 'Created', detail: ''});
+    if (o.accepted_at) events.push({time: o.accepted_at, type: 'done', label: 'Accepted', detail: ''});
+    if (o.completed_at) events.push({time: o.completed_at, type: 'done', label: 'Completed', detail: ''});
+    if (o.failed_at) events.push({time: o.failed_at, type: 'failed', label: 'Failed', detail: ''});
+
+    // Insert child orders as timeline events
+    for (var i = 0; i < children.length; i++) {
+      var c = children[i];
+      var taskPreview = (c.buyer_task || '').substring(0, 60);
+      if ((c.buyer_task || '').length > 60) taskPreview += '...';
+      events.push({
+        time: c.created_at,
+        type: 'child',
+        label: 'Sub-task \u2192 ' + (c.seller_agent_name || '?'),
+        detail: taskPreview,
+        childId: c.id,
+        childStatus: c.status,
+        childAgent: c.seller_agent_name
+      });
+    }
+
+    // Sort by time
+    events.sort(function(a, b) { return a.time < b.time ? -1 : a.time > b.time ? 1 : 0; });
+
+    // Add active status indicators (no timestamp, appended at end)
+    var activeEvents = [];
+    if (!o.accepted_at && o.status === 'pending') activeEvents.push({type: 'active', label: 'Waiting for agent...', detail: ''});
+    if (o.status === 'processing') activeEvents.push({type: 'active', label: 'Processing...', detail: ''});
+
     h += '<div class="timeline" style="margin-top:1rem">';
-    h += '<div class="timeline-item done"><div class="timeline-label">Created</div><div class="timeline-time">' + fmtTime(o.created_at) + '</div></div>';
-    if (o.accepted_at) h += '<div class="timeline-item done"><div class="timeline-label">Accepted</div><div class="timeline-time">' + fmtTime(o.accepted_at) + '</div></div>';
-    else if (o.status === 'pending') h += '<div class="timeline-item active"><div class="timeline-label">Waiting for agent...</div></div>';
-    if (o.status === 'processing') h += '<div class="timeline-item active"><div class="timeline-label">Processing...</div></div>';
-    if (o.completed_at) h += '<div class="timeline-item done"><div class="timeline-label">Completed</div><div class="timeline-time">' + fmtTime(o.completed_at) + '</div></div>';
-    if (o.failed_at) h += '<div class="timeline-item"><div class="timeline-label" style="color:#ff6644">Failed</div><div class="timeline-time">' + fmtTime(o.failed_at) + '</div></div>';
+    for (var j = 0; j < events.length; j++) {
+      var ev = events[j];
+      if (ev.type === 'child') {
+        var sc = statusColor(ev.childStatus);
+        h += '<div class="timeline-item" style="padding:0.4rem 0">';
+        h += '<div style="position:absolute;left:-1.75rem;top:0.6rem;width:10px;height:10px;border-radius:50%;background:' + sc + ';' + (ev.childStatus === 'processing' ? 'box-shadow:0 0 6px ' + sc : '') + '"></div>';
+        h += '<div class="timeline-label"><a href="/order/' + esc(ev.childId) + '" style="color:' + sc + '">Sub-task \u2192 ' + esc(ev.childAgent) + '</a>';
+        h += ' <span class="status-badge status-' + ev.childStatus + '" style="font-size:0.6rem;padding:2px 6px;vertical-align:middle">' + esc(ev.childStatus) + '</span></div>';
+        if (ev.detail) h += '<div class="timeline-time" style="color:#888">' + esc(ev.detail) + '</div>';
+        h += '<div class="timeline-time">' + fmtTime(ev.time) + '</div>';
+        h += '</div>';
+      } else if (ev.type === 'failed') {
+        h += '<div class="timeline-item"><div class="timeline-label" style="color:#ff6644">' + esc(ev.label) + '</div><div class="timeline-time">' + fmtTime(ev.time) + '</div></div>';
+      } else {
+        h += '<div class="timeline-item done"><div class="timeline-label">' + esc(ev.label) + '</div><div class="timeline-time">' + fmtTime(ev.time) + '</div></div>';
+      }
+    }
+    for (var k = 0; k < activeEvents.length; k++) {
+      h += '<div class="timeline-item active"><div class="timeline-label">' + esc(activeEvents[k].label) + '</div></div>';
+    }
     h += '</div>';
 
     if (o.result_text) {

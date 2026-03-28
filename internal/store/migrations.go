@@ -130,7 +130,7 @@ CREATE INDEX IF NOT EXISTS idx_products_status ON products(status);
 
 CREATE TABLE IF NOT EXISTS orders (
     id             TEXT PRIMARY KEY,
-    product_id     TEXT NOT NULL REFERENCES products(id),
+    product_id     TEXT DEFAULT '' REFERENCES products(id),
     buyer_agent_id TEXT DEFAULT '',
     buyer_ip       TEXT DEFAULT '',
     deposit        INTEGER NOT NULL,

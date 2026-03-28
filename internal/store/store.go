@@ -108,6 +108,9 @@ func (s *Store) Migrate() error {
 		UNIQUE(agent_name, slug)
 	)`)
 
+	// Drop NOT NULL + foreign key on product_id (ad-hoc orders have no product)
+	s.migrateOrdersDropProductNotNull()
+
 	// Order system v2 — async orders
 	s.db.Exec(`ALTER TABLE orders ADD COLUMN seller_agent_id TEXT DEFAULT ''`)
 	s.db.Exec(`ALTER TABLE orders ADD COLUMN seller_agent_name TEXT DEFAULT ''`)
@@ -123,11 +126,83 @@ func (s *Store) Migrate() error {
 	s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_orders_seller ON orders(seller_agent_id)`)
 	s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_orders_parent ON orders(parent_order_id)`)
 	s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_orders_timeout ON orders(timeout_at)`)
+	s.db.Exec(`ALTER TABLE orders ADD COLUMN human_origin INTEGER DEFAULT 0`)
 	// Migrate old pending orders: those with results → completed, without → cancelled
 	s.db.Exec(`UPDATE orders SET status = 'completed', completed_at = created_at WHERE status = 'pending' AND result_text != '' AND result_text IS NOT NULL`)
 	s.db.Exec(`UPDATE orders SET status = 'cancelled', completed_at = created_at WHERE status = 'pending' AND (result_text = '' OR result_text IS NULL)`)
 
 	return nil
+}
+
+// migrateOrdersDropProductNotNull recreates the orders table without NOT NULL on product_id.
+// SQLite doesn't support ALTER COLUMN, so we use the standard recreate pattern.
+func (s *Store) migrateOrdersDropProductNotNull() {
+	// Check if product_id still has NOT NULL constraint
+	var hasNotNull bool
+	rows, err := s.db.Query(`PRAGMA table_info(orders)`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull int
+		var dfltValue interface{}
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dfltValue, &pk); err != nil {
+			continue
+		}
+		if name == "product_id" && notnull == 1 {
+			hasNotNull = true
+		}
+	}
+	if !hasNotNull {
+		return
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return
+	}
+	defer tx.Rollback()
+	// Must disable foreign keys inside the migration (can't change mid-transaction on some drivers)
+	tx.Exec(`PRAGMA foreign_keys = OFF`)
+	tx.Exec(`CREATE TABLE orders_new AS SELECT * FROM orders`)
+	tx.Exec(`DROP TABLE orders`)
+	tx.Exec(`CREATE TABLE orders (
+		id             TEXT PRIMARY KEY,
+		product_id     TEXT DEFAULT '' REFERENCES products(id),
+		buyer_agent_id TEXT DEFAULT '',
+		buyer_ip       TEXT DEFAULT '',
+		deposit        INTEGER NOT NULL DEFAULT 0,
+		total_price    INTEGER NOT NULL DEFAULT 0,
+		status         TEXT DEFAULT 'pending',
+		result_text    TEXT DEFAULT '',
+		created_at     TEXT NOT NULL DEFAULT '',
+		completed_at   TEXT DEFAULT '',
+		seller_agent_id   TEXT DEFAULT '',
+		seller_agent_name TEXT DEFAULT '',
+		parent_order_id   TEXT DEFAULT '',
+		buyer_task        TEXT DEFAULT '',
+		offer_price       INTEGER DEFAULT 0,
+		escrow_amount     INTEGER DEFAULT 0,
+		retry_count       INTEGER DEFAULT 0,
+		max_retries       INTEGER DEFAULT 5,
+		timeout_at        TEXT DEFAULT '',
+		accepted_at       TEXT DEFAULT '',
+		failed_at         TEXT DEFAULT '',
+		human_origin      INTEGER DEFAULT 0
+	)`)
+	tx.Exec(`INSERT INTO orders SELECT *, 0 FROM orders_new`)
+	tx.Exec(`DROP TABLE orders_new`)
+	tx.Exec(`CREATE INDEX IF NOT EXISTS idx_orders_product ON orders(product_id)`)
+	tx.Exec(`CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)`)
+	tx.Exec(`CREATE INDEX IF NOT EXISTS idx_orders_seller ON orders(seller_agent_id)`)
+	tx.Exec(`CREATE INDEX IF NOT EXISTS idx_orders_parent ON orders(parent_order_id)`)
+	tx.Exec(`CREATE INDEX IF NOT EXISTS idx_orders_timeout ON orders(timeout_at)`)
+	tx.Exec(`PRAGMA foreign_keys = ON`)
+	tx.Commit()
 }
 
 // --- Accounts ---
@@ -856,6 +931,7 @@ type Order struct {
 	AcceptedAt      string `json:"accepted_at,omitempty"`
 	CompletedAt     string `json:"completed_at,omitempty"`
 	FailedAt        string `json:"failed_at,omitempty"`
+	HumanOrigin     bool   `json:"human_origin,omitempty"`
 }
 
 func (s *Store) CreateOrder(o *Order) error {
@@ -863,10 +939,15 @@ func (s *Store) CreateOrder(o *Order) error {
 	if o.MaxRetries == 0 {
 		o.MaxRetries = 5
 	}
+	// NULL product_id bypasses foreign key check (ad-hoc orders have no product)
+	var productID interface{} = o.ProductID
+	if o.ProductID == "" {
+		productID = nil
+	}
 	_, err := s.db.Exec(`
-		INSERT INTO orders (id, product_id, seller_agent_id, seller_agent_name, buyer_agent_id, buyer_ip, buyer_task, parent_order_id, deposit, total_price, offer_price, escrow_amount, status, max_retries, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'pending', ?, ?)
-	`, o.ID, o.ProductID, o.SellerAgentID, o.SellerAgentName, o.BuyerAgentID, o.BuyerIP, o.BuyerTask, o.ParentOrderID, o.Deposit, o.TotalPrice, o.OfferPrice, o.MaxRetries, now)
+		INSERT INTO orders (id, product_id, seller_agent_id, seller_agent_name, buyer_agent_id, buyer_ip, buyer_task, parent_order_id, deposit, total_price, offer_price, escrow_amount, status, max_retries, human_origin, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'pending', ?, ?, ?)
+	`, o.ID, productID, o.SellerAgentID, o.SellerAgentName, o.BuyerAgentID, o.BuyerIP, o.BuyerTask, o.ParentOrderID, o.Deposit, o.TotalPrice, o.OfferPrice, o.MaxRetries, o.HumanOrigin, now)
 	return err
 }
 
@@ -877,13 +958,15 @@ func (s *Store) GetOrder(id string) (*Order, error) {
 		       buyer_agent_id, buyer_ip, COALESCE(buyer_task, ''), COALESCE(parent_order_id, ''),
 		       deposit, total_price, COALESCE(offer_price, 0), COALESCE(escrow_amount, 0),
 		       status, result_text, COALESCE(retry_count, 0), COALESCE(max_retries, 5),
-		       COALESCE(timeout_at, ''), created_at, COALESCE(accepted_at, ''), COALESCE(completed_at, ''), COALESCE(failed_at, '')
+		       COALESCE(timeout_at, ''), created_at, COALESCE(accepted_at, ''), COALESCE(completed_at, ''), COALESCE(failed_at, ''),
+		       COALESCE(human_origin, 0)
 		FROM orders WHERE id = ?
 	`, id).Scan(&o.ID, &o.ProductID, &o.SellerAgentID, &o.SellerAgentName,
 		&o.BuyerAgentID, &o.BuyerIP, &o.BuyerTask, &o.ParentOrderID,
 		&o.Deposit, &o.TotalPrice, &o.OfferPrice, &o.EscrowAmount,
 		&o.Status, &o.ResultText, &o.RetryCount, &o.MaxRetries,
-		&o.TimeoutAt, &o.CreatedAt, &o.AcceptedAt, &o.CompletedAt, &o.FailedAt)
+		&o.TimeoutAt, &o.CreatedAt, &o.AcceptedAt, &o.CompletedAt, &o.FailedAt,
+		&o.HumanOrigin)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -891,6 +974,36 @@ func (s *Store) GetOrder(id string) (*Order, error) {
 		return nil, err
 	}
 	return o, nil
+}
+
+func (s *Store) ListChildOrders(parentID string) ([]*Order, error) {
+	rows, err := s.db.Query(`
+		SELECT id, product_id, COALESCE(seller_agent_id, ''), COALESCE(seller_agent_name, ''),
+		       buyer_agent_id, buyer_ip, COALESCE(buyer_task, ''), COALESCE(parent_order_id, ''),
+		       deposit, total_price, COALESCE(offer_price, 0), COALESCE(escrow_amount, 0),
+		       status, result_text, COALESCE(retry_count, 0), COALESCE(max_retries, 5),
+		       COALESCE(timeout_at, ''), created_at, COALESCE(accepted_at, ''), COALESCE(completed_at, ''), COALESCE(failed_at, ''),
+		       COALESCE(human_origin, 0)
+		FROM orders WHERE parent_order_id = ? ORDER BY created_at ASC
+	`, parentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Order
+	for rows.Next() {
+		o := &Order{}
+		if err := rows.Scan(&o.ID, &o.ProductID, &o.SellerAgentID, &o.SellerAgentName,
+			&o.BuyerAgentID, &o.BuyerIP, &o.BuyerTask, &o.ParentOrderID,
+			&o.Deposit, &o.TotalPrice, &o.OfferPrice, &o.EscrowAmount,
+			&o.Status, &o.ResultText, &o.RetryCount, &o.MaxRetries,
+			&o.TimeoutAt, &o.CreatedAt, &o.AcceptedAt, &o.CompletedAt, &o.FailedAt,
+			&o.HumanOrigin); err != nil {
+			return nil, err
+		}
+		out = append(out, o)
+	}
+	return out, nil
 }
 
 func (s *Store) UpdateOrderResult(id, result string) error {

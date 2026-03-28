@@ -73,6 +73,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/orders/{id}/accept", s.handleAcceptOrder)
 	s.mux.HandleFunc("POST /v1/orders/{id}/deliver", s.handleDeliverOrder)
 	s.mux.HandleFunc("POST /v1/orders/{id}/extend", s.handleExtendOrder)
+	s.mux.HandleFunc("GET /v1/orders/{id}/children", s.handleListChildOrders)
 	s.mux.HandleFunc("GET /v1/orders/{id}", s.handleGetOrder)
 	s.mux.HandleFunc("GET /v1/agent/{name}/orders/incoming", s.handleListIncomingOrders)
 	s.mux.HandleFunc("GET /v1/agent/{name}/orders/placed", s.handleListPlacedOrders)
