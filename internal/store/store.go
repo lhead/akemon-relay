@@ -954,11 +954,11 @@ func (s *Store) CreateOrder(o *Order) error {
 func (s *Store) GetOrder(id string) (*Order, error) {
 	o := &Order{}
 	err := s.db.QueryRow(`
-		SELECT id, product_id, COALESCE(seller_agent_id, ''), COALESCE(seller_agent_name, ''),
-		       buyer_agent_id, buyer_ip, COALESCE(buyer_task, ''), COALESCE(parent_order_id, ''),
-		       deposit, total_price, COALESCE(offer_price, 0), COALESCE(escrow_amount, 0),
-		       status, result_text, COALESCE(retry_count, 0), COALESCE(max_retries, 5),
-		       COALESCE(timeout_at, ''), created_at, COALESCE(accepted_at, ''), COALESCE(completed_at, ''), COALESCE(failed_at, ''),
+		SELECT id, COALESCE(product_id, ''), COALESCE(seller_agent_id, ''), COALESCE(seller_agent_name, ''),
+		       COALESCE(buyer_agent_id, ''), COALESCE(buyer_ip, ''), COALESCE(buyer_task, ''), COALESCE(parent_order_id, ''),
+		       COALESCE(deposit, 0), COALESCE(total_price, 0), COALESCE(offer_price, 0), COALESCE(escrow_amount, 0),
+		       COALESCE(status, ''), COALESCE(result_text, ''), COALESCE(retry_count, 0), COALESCE(max_retries, 5),
+		       COALESCE(timeout_at, ''), COALESCE(created_at, ''), COALESCE(accepted_at, ''), COALESCE(completed_at, ''), COALESCE(failed_at, ''),
 		       COALESCE(human_origin, 0)
 		FROM orders WHERE id = ?
 	`, id).Scan(&o.ID, &o.ProductID, &o.SellerAgentID, &o.SellerAgentName,
@@ -978,11 +978,11 @@ func (s *Store) GetOrder(id string) (*Order, error) {
 
 func (s *Store) ListChildOrders(parentID string) ([]*Order, error) {
 	rows, err := s.db.Query(`
-		SELECT id, product_id, COALESCE(seller_agent_id, ''), COALESCE(seller_agent_name, ''),
-		       buyer_agent_id, buyer_ip, COALESCE(buyer_task, ''), COALESCE(parent_order_id, ''),
-		       deposit, total_price, COALESCE(offer_price, 0), COALESCE(escrow_amount, 0),
-		       status, result_text, COALESCE(retry_count, 0), COALESCE(max_retries, 5),
-		       COALESCE(timeout_at, ''), created_at, COALESCE(accepted_at, ''), COALESCE(completed_at, ''), COALESCE(failed_at, ''),
+		SELECT id, COALESCE(product_id, ''), COALESCE(seller_agent_id, ''), COALESCE(seller_agent_name, ''),
+		       COALESCE(buyer_agent_id, ''), COALESCE(buyer_ip, ''), COALESCE(buyer_task, ''), COALESCE(parent_order_id, ''),
+		       COALESCE(deposit, 0), COALESCE(total_price, 0), COALESCE(offer_price, 0), COALESCE(escrow_amount, 0),
+		       COALESCE(status, ''), COALESCE(result_text, ''), COALESCE(retry_count, 0), COALESCE(max_retries, 5),
+		       COALESCE(timeout_at, ''), COALESCE(created_at, ''), COALESCE(accepted_at, ''), COALESCE(completed_at, ''), COALESCE(failed_at, ''),
 		       COALESCE(human_origin, 0)
 		FROM orders WHERE parent_order_id = ? ORDER BY created_at ASC
 	`, parentID)
@@ -1142,13 +1142,13 @@ func (s *Store) ListRecentOrders(limit int) ([]OrderListing, error) {
 		limit = 50
 	}
 	rows, err := s.db.Query(`
-		SELECT o.id, o.product_id, COALESCE(p.name, ''), COALESCE(seller.name, o.seller_agent_name), COALESCE(seller.avatar, ''),
-		       o.buyer_agent_id, COALESCE(buyer.name, ''), o.buyer_ip,
+		SELECT o.id, COALESCE(o.product_id, ''), COALESCE(p.name, ''), COALESCE(seller.name, o.seller_agent_name), COALESCE(seller.avatar, ''),
+		       COALESCE(o.buyer_agent_id, ''), COALESCE(buyer.name, ''), COALESCE(o.buyer_ip, ''),
 		       COALESCE(o.buyer_task, ''), COALESCE(o.parent_order_id, ''),
-		       o.deposit, o.total_price, COALESCE(o.offer_price, 0), COALESCE(o.escrow_amount, 0),
-		       o.status, o.result_text,
+		       COALESCE(o.deposit, 0), COALESCE(o.total_price, 0), COALESCE(o.offer_price, 0), COALESCE(o.escrow_amount, 0),
+		       COALESCE(o.status, ''), COALESCE(o.result_text, ''),
 		       COALESCE(o.retry_count, 0), COALESCE(o.max_retries, 5),
-		       COALESCE(o.timeout_at, ''), o.created_at, COALESCE(o.accepted_at, ''), COALESCE(o.completed_at, ''), COALESCE(o.failed_at, '')
+		       COALESCE(o.timeout_at, ''), COALESCE(o.created_at, ''), COALESCE(o.accepted_at, ''), COALESCE(o.completed_at, ''), COALESCE(o.failed_at, '')
 		FROM orders o
 		LEFT JOIN products p ON p.id = o.product_id
 		LEFT JOIN agents seller ON seller.id = CASE WHEN o.seller_agent_id != '' THEN o.seller_agent_id ELSE p.agent_id END
@@ -1180,13 +1180,13 @@ func (s *Store) ListRecentOrders(limit int) ([]OrderListing, error) {
 // ListSellerOrders returns incoming orders for a seller agent (pending + processing)
 func (s *Store) ListSellerOrders(sellerAgentID string) ([]OrderListing, error) {
 	rows, err := s.db.Query(`
-		SELECT o.id, o.product_id, COALESCE(p.name, ''), COALESCE(seller.name, o.seller_agent_name), COALESCE(seller.avatar, ''),
-		       o.buyer_agent_id, COALESCE(buyer.name, ''), o.buyer_ip,
+		SELECT o.id, COALESCE(o.product_id, ''), COALESCE(p.name, ''), COALESCE(seller.name, o.seller_agent_name), COALESCE(seller.avatar, ''),
+		       COALESCE(o.buyer_agent_id, ''), COALESCE(buyer.name, ''), COALESCE(o.buyer_ip, ''),
 		       COALESCE(o.buyer_task, ''), COALESCE(o.parent_order_id, ''),
-		       o.deposit, o.total_price, COALESCE(o.offer_price, 0), COALESCE(o.escrow_amount, 0),
-		       o.status, o.result_text,
+		       COALESCE(o.deposit, 0), COALESCE(o.total_price, 0), COALESCE(o.offer_price, 0), COALESCE(o.escrow_amount, 0),
+		       COALESCE(o.status, ''), COALESCE(o.result_text, ''),
 		       COALESCE(o.retry_count, 0), COALESCE(o.max_retries, 5),
-		       COALESCE(o.timeout_at, ''), o.created_at, COALESCE(o.accepted_at, ''), COALESCE(o.completed_at, ''), COALESCE(o.failed_at, '')
+		       COALESCE(o.timeout_at, ''), COALESCE(o.created_at, ''), COALESCE(o.accepted_at, ''), COALESCE(o.completed_at, ''), COALESCE(o.failed_at, '')
 		FROM orders o
 		LEFT JOIN products p ON p.id = o.product_id
 		LEFT JOIN agents seller ON seller.id = o.seller_agent_id
@@ -1218,13 +1218,13 @@ func (s *Store) ListSellerOrders(sellerAgentID string) ([]OrderListing, error) {
 // ListBuyerOrders returns orders placed by a buyer agent
 func (s *Store) ListBuyerOrders(buyerAgentID string) ([]OrderListing, error) {
 	rows, err := s.db.Query(`
-		SELECT o.id, o.product_id, COALESCE(p.name, ''), COALESCE(seller.name, o.seller_agent_name), COALESCE(seller.avatar, ''),
-		       o.buyer_agent_id, COALESCE(buyer.name, ''), o.buyer_ip,
+		SELECT o.id, COALESCE(o.product_id, ''), COALESCE(p.name, ''), COALESCE(seller.name, o.seller_agent_name), COALESCE(seller.avatar, ''),
+		       COALESCE(o.buyer_agent_id, ''), COALESCE(buyer.name, ''), COALESCE(o.buyer_ip, ''),
 		       COALESCE(o.buyer_task, ''), COALESCE(o.parent_order_id, ''),
-		       o.deposit, o.total_price, COALESCE(o.offer_price, 0), COALESCE(o.escrow_amount, 0),
-		       o.status, o.result_text,
+		       COALESCE(o.deposit, 0), COALESCE(o.total_price, 0), COALESCE(o.offer_price, 0), COALESCE(o.escrow_amount, 0),
+		       COALESCE(o.status, ''), COALESCE(o.result_text, ''),
 		       COALESCE(o.retry_count, 0), COALESCE(o.max_retries, 5),
-		       COALESCE(o.timeout_at, ''), o.created_at, COALESCE(o.accepted_at, ''), COALESCE(o.completed_at, ''), COALESCE(o.failed_at, '')
+		       COALESCE(o.timeout_at, ''), COALESCE(o.created_at, ''), COALESCE(o.accepted_at, ''), COALESCE(o.completed_at, ''), COALESCE(o.failed_at, '')
 		FROM orders o
 		LEFT JOIN products p ON p.id = o.product_id
 		LEFT JOIN agents seller ON seller.id = CASE WHEN o.seller_agent_id != '' THEN o.seller_agent_id ELSE p.agent_id END
@@ -1305,13 +1305,13 @@ func (s *Store) ListProductReviews(productID string) ([]Review, error) {
 
 func (s *Store) ListUnreviewedOrders(buyerName string) ([]OrderListing, error) {
 	rows, err := s.db.Query(`
-		SELECT o.id, o.product_id, COALESCE(p.name, ''), COALESCE(seller.name, o.seller_agent_name), COALESCE(seller.avatar, ''),
-		       o.buyer_agent_id, COALESCE(buyer.name, ''), o.buyer_ip,
+		SELECT o.id, COALESCE(o.product_id, ''), COALESCE(p.name, ''), COALESCE(seller.name, o.seller_agent_name), COALESCE(seller.avatar, ''),
+		       COALESCE(o.buyer_agent_id, ''), COALESCE(buyer.name, ''), COALESCE(o.buyer_ip, ''),
 		       COALESCE(o.buyer_task, ''), COALESCE(o.parent_order_id, ''),
-		       o.deposit, o.total_price, COALESCE(o.offer_price, 0), COALESCE(o.escrow_amount, 0),
-		       o.status, o.result_text,
+		       COALESCE(o.deposit, 0), COALESCE(o.total_price, 0), COALESCE(o.offer_price, 0), COALESCE(o.escrow_amount, 0),
+		       COALESCE(o.status, ''), COALESCE(o.result_text, ''),
 		       COALESCE(o.retry_count, 0), COALESCE(o.max_retries, 5),
-		       COALESCE(o.timeout_at, ''), o.created_at, COALESCE(o.accepted_at, ''), COALESCE(o.completed_at, ''), COALESCE(o.failed_at, '')
+		       COALESCE(o.timeout_at, ''), COALESCE(o.created_at, ''), COALESCE(o.accepted_at, ''), COALESCE(o.completed_at, ''), COALESCE(o.failed_at, '')
 		FROM orders o
 		LEFT JOIN products p ON p.id = o.product_id
 		LEFT JOIN agents seller ON seller.id = CASE WHEN o.seller_agent_id != '' THEN o.seller_agent_id ELSE p.agent_id END
