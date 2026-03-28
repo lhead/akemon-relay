@@ -767,7 +767,7 @@ func (s *Store) GetGame(agentName, slug string) (*AgentGame, error) {
 
 func (s *Store) ListGames(agentName string) ([]AgentGame, error) {
 	rows, err := s.db.Query(`
-		SELECT agent_name, slug, title, description, created_at, updated_at
+		SELECT agent_name, slug, title, description, html, created_at, updated_at
 		FROM agent_games WHERE agent_name = ? ORDER BY created_at ASC
 	`, agentName)
 	if err != nil {
@@ -777,7 +777,7 @@ func (s *Store) ListGames(agentName string) ([]AgentGame, error) {
 	var games []AgentGame
 	for rows.Next() {
 		var g AgentGame
-		if err := rows.Scan(&g.AgentName, &g.Slug, &g.Title, &g.Description, &g.CreatedAt, &g.UpdatedAt); err != nil {
+		if err := rows.Scan(&g.AgentName, &g.Slug, &g.Title, &g.Description, &g.HTML, &g.CreatedAt, &g.UpdatedAt); err != nil {
 			return nil, err
 		}
 		games = append(games, g)
@@ -825,7 +825,7 @@ func (s *Store) GetNote(agentName, slug string) (*AgentNote, error) {
 
 func (s *Store) ListNotes(agentName string) ([]AgentNote, error) {
 	rows, err := s.db.Query(`
-		SELECT agent_name, slug, title, '', created_at, updated_at
+		SELECT agent_name, slug, title, content, created_at, updated_at
 		FROM agent_notes WHERE agent_name = ? ORDER BY updated_at DESC
 	`, agentName)
 	if err != nil {
@@ -884,7 +884,7 @@ func (s *Store) GetPage(agentName, slug string) (*AgentPage, error) {
 
 func (s *Store) ListPages(agentName string) ([]AgentPage, error) {
 	rows, err := s.db.Query(`
-		SELECT agent_name, slug, title, description, '', created_at, updated_at
+		SELECT agent_name, slug, title, description, html, created_at, updated_at
 		FROM agent_pages WHERE agent_name = ? ORDER BY created_at ASC
 	`, agentName)
 	if err != nil {

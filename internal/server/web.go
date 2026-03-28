@@ -896,7 +896,7 @@ function renderProfile(a) {
   h += '<div class="st"><div class="st-l">Price</div><div class="st-v">' + (a.price || 1) + '</div></div>';
   h += '</div>';
   var regDate = a.first_registered || a.registered_at || '';
-  if (regDate) h += '<div class="meta">Registered: ' + esc(regDate.split('T')[0]) + '</div>';
+  if (regDate) h += '<div class="meta">Registered: ' + esc(new Date(regDate).toLocaleDateString()) + '</div>';
   h += '</div>';
 
   if (a.self_intro) {
@@ -1294,7 +1294,7 @@ function render() {
     if (s.type === 'agent' && s.target_name) {
       h += ' &rarr; <a href="/agent/' + encodeURIComponent(s.target_name) + '">' + esc(s.target_name) + '</a>';
     }
-    h += ' &middot; ' + (s.created_at || '').split('T')[0];
+    h += ' &middot; ' + (s.created_at ? new Date(s.created_at).toLocaleDateString() : '');
     h += '</div>';
     h += '<div class="card-content">' + esc(s.content) + '</div>';
     h += '</div>';
@@ -1638,7 +1638,7 @@ function renderProduct(p, online) {
   h += '<div class="meta-row">';
   h += '<div class="meta-item"><div class="meta-label">Price</div><div class="meta-value price">' + (p.price || 1) + ' \u00A2</div></div>';
   h += '<div class="meta-item"><div class="meta-label">Purchases</div><div class="meta-value">' + (p.purchase_count || 0) + '</div></div>';
-  h += '<div class="meta-item"><div class="meta-label">Listed</div><div class="meta-value" style="font-size:0.8rem">' + (p.created_at || '').split('T')[0] + '</div></div>';
+  h += '<div class="meta-item"><div class="meta-label">Listed</div><div class="meta-value" style="font-size:0.8rem">' + (p.created_at ? new Date(p.created_at).toLocaleDateString() : '') + '</div></div>';
   h += '</div>';
 
   if (p.description) h += '<div class="description">' + esc(p.description) + '</div>';
@@ -1800,7 +1800,7 @@ function loadReviews() {
       h += '<div class="review-item">';
       h += '<div class="review-header">';
       h += '<span class="review-author">' + esc(r.reviewer_name) + ' <span class="review-stars">' + starHTML(r.rating) + '</span></span>';
-      h += '<span class="review-date">' + (r.created_at || '').split('T')[0] + '</span>';
+      h += '<span class="review-date">' + (r.created_at ? new Date(r.created_at).toLocaleDateString() : '') + '</span>';
       h += '</div>';
       if (r.comment) h += '<div class="review-comment">' + esc(r.comment) + '</div>';
       h += '</div>';
@@ -1908,6 +1908,7 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:0.75re
 <div id="empty" class="empty" style="display:none">No transactions yet.</div>
 
 <script>
+function fmtTime(t) { if (!t) return ''; try { var d = new Date(t); return isNaN(d.getTime()) ? t : d.toLocaleString(); } catch(e) { return t; } }
 function esc(s) {
   if (!s) return '';
   var d = document.createElement('div');
@@ -1965,7 +1966,7 @@ function load() {
       h += 'Price: <strong>' + o.total_price + '</strong> credits';
       if (o.deposit > 0) h += ' (deposit: ' + o.deposit + ')';
       h += '</div>';
-      h += '<div class="order-time">' + (o.created_at || '').replace('T', ' ').replace(/\.\d+Z$/, ' UTC').replace('Z', ' UTC') + '</div>';
+      h += '<div class="order-time">' + fmtTime(o.created_at) + '</div>';
       if (o.result_text) {
         h += '<div class="order-result">';
         h += '<div class="order-result-toggle" onclick="toggleResult(\'' + esc(o.id) + '\')">Show result \u25BE</div>';
@@ -2059,7 +2060,7 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:0.75re
 <script>
 var ORDER_ID = '__ORDER_ID__';
 function esc(s) { if (!s) return ''; var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
-function fmtTime(t) { return t ? t.replace('T', ' ').replace(/\.\d+Z$/, ' UTC').replace('Z', ' UTC') : ''; }
+function fmtTime(t) { if (!t) return ''; try { var d = new Date(t); return isNaN(d.getTime()) ? t : d.toLocaleString(); } catch(e) { return t; } }
 
 function statusColor(s) {
   if (s === 'completed') return '#00d4aa';
