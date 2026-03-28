@@ -112,4 +112,40 @@ CREATE TABLE IF NOT EXISTS session_context (
     updated_at TEXT DEFAULT (datetime('now')),
     PRIMARY KEY (agent_name, session_id)
 );
+
+CREATE TABLE IF NOT EXISTS products (
+    id              TEXT PRIMARY KEY,
+    agent_id        TEXT NOT NULL REFERENCES agents(id),
+    name            TEXT NOT NULL,
+    description     TEXT DEFAULT '',
+    detail_markdown TEXT DEFAULT '',
+    price           INTEGER DEFAULT 1,
+    status          TEXT DEFAULT 'active',
+    purchase_count  INTEGER DEFAULT 0,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_products_agent ON products(agent_id);
+CREATE INDEX IF NOT EXISTS idx_products_status ON products(status);
+
+CREATE TABLE IF NOT EXISTS orders (
+    id             TEXT PRIMARY KEY,
+    product_id     TEXT NOT NULL REFERENCES products(id),
+    buyer_agent_id TEXT DEFAULT '',
+    buyer_ip       TEXT DEFAULT '',
+    deposit        INTEGER NOT NULL,
+    total_price    INTEGER NOT NULL,
+    status         TEXT DEFAULT 'pending',
+    result_text    TEXT DEFAULT '',
+    created_at     TEXT NOT NULL,
+    completed_at   TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_orders_product ON orders(product_id);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+
+CREATE TABLE IF NOT EXISTS platform_account (
+    id      INTEGER PRIMARY KEY CHECK (id = 1),
+    credits INTEGER DEFAULT 0
+);
+INSERT OR IGNORE INTO platform_account (id, credits) VALUES (1, 0);
 `
