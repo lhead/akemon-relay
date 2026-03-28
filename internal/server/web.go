@@ -2034,6 +2034,14 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:0.75re
 .info-label{color:#777;min-width:80px}
 .result-box{margin-top:0.5rem;background:#0a0a0a;border:1px solid #222;border-radius:8px;padding:1rem;font-size:0.85rem;line-height:1.6;white-space:pre-wrap;word-break:break-word;max-height:400px;overflow-y:auto}
 .empty{text-align:center;padding:4rem;color:#555}
+.reply-section{margin-top:1.5rem;padding-top:1rem;border-top:1px solid #222}
+.reply-section textarea{width:100%;min-height:80px;background:#0a0a0a;border:1px solid #333;border-radius:8px;color:#e0e0e0;padding:0.75rem;font-size:0.85rem;font-family:inherit;resize:vertical}
+.reply-section textarea:focus{outline:none;border-color:#00d4aa}
+.reply-section .btn{margin-top:0.5rem;background:#00d4aa;color:#000;border:none;padding:0.5rem 1.5rem;border-radius:6px;font-weight:600;cursor:pointer;font-size:0.85rem}
+.reply-section .btn:hover{background:#00e8bb}
+.reply-section .btn:disabled{opacity:0.5;cursor:not-allowed}
+.reply-section .reply-loading{display:none;margin-top:0.5rem;font-size:0.8rem;color:#4da6ff}
+.reply-section .reply-loading.on{display:block}
 </style>
 </head>
 <body>
@@ -2148,8 +2156,22 @@ function load() {
       h += '<div class="result-box">' + esc(o.result_text) + '</div>';
     }
 
+    // Reply form for completed orders
+    if (o.status === 'completed' && o.seller_agent_name) {
+      h += '<div class="reply-section">';
+      h += '<strong style="font-size:0.9rem">Continue conversation with ' + esc(o.seller_agent_name) + '</strong>';
+      h += '<textarea id="reply-input" placeholder="Type your follow-up message..."></textarea>';
+      h += '<button class="btn" id="reply-btn" onclick="submitReply()">Send</button>';
+      h += '<div class="reply-loading" id="reply-loading"><span class="spinner">&#9696;</span> Placing order... <span id="reply-elapsed"></span></div>';
+      h += '<div id="reply-result"></div>';
+      h += '</div>';
+    }
+
     h += '</div>';
     document.getElementById('content').innerHTML = h;
+
+    // Store order data for reply
+    window._currentOrder = o;
 
     if (o.status === 'pending' || o.status === 'processing') {
       setTimeout(load, 5000);
@@ -2159,6 +2181,89 @@ function load() {
     document.getElementById('content').innerHTML = '<div class="empty">Order not found.</div>';
   });
 }
+
+// Build conversation context by walking the order chain
+function buildContext(order, callback) {
+  var chain = [];
+  function walk(oid) {
+    fetch('/v1/orders/' + oid).then(function(r) { return r.json(); }).then(function(o) {
+      chain.unshift({task: o.buyer_task || '', result: o.result_text || ''});
+      if (o.parent_order_id) walk(o.parent_order_id);
+      else callback(chain);
+    }).catch(function() { callback(chain); });
+  }
+  chain.push({task: order.buyer_task || '', result: order.result_text || ''});
+  if (order.parent_order_id) walk(order.parent_order_id);
+  else callback(chain);
+}
+
+var replyTmr = null;
+var replyPoll = null;
+function submitReply() {
+  var msg = document.getElementById('reply-input').value.trim();
+  if (!msg) return;
+  var o = window._currentOrder;
+  if (!o || !o.seller_agent_name) return;
+
+  var btn = document.getElementById('reply-btn');
+  var ld = document.getElementById('reply-loading');
+  var res = document.getElementById('reply-result');
+  btn.disabled = true;
+  ld.className = 'reply-loading on';
+  res.innerHTML = '';
+  var sec = 0;
+  replyTmr = setInterval(function() { sec++; var m = Math.floor(sec/60); document.getElementById('reply-elapsed').textContent = (m>0?m+'m ':'')+sec%60+'s'; }, 1000);
+
+  // Build context from conversation history
+  buildContext(o, function(chain) {
+    var ctx = '';
+    for (var i = 0; i < chain.length; i++) {
+      if (chain[i].task) ctx += '[User]: ' + chain[i].task + '\n';
+      if (chain[i].result) ctx += '[Agent]: ' + chain[i].result + '\n';
+    }
+    var fullTask = '[Continuing conversation]\n\n' + ctx + '[User]: ' + msg;
+
+    fetch('/v1/agent/' + encodeURIComponent(o.seller_agent_name) + '/orders', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({task: fullTask, parent_order_id: o.id})
+    })
+    .then(function(r) { if (!r.ok) return r.json().then(function(b) { throw new Error(b.error || 'Failed'); }); return r.json(); })
+    .then(function(data) {
+      var oid = data.order_id;
+      res.innerHTML = '\u23F3 <a href="/order/' + esc(oid) + '" style="color:#00d4aa">#' + esc(oid.substring(0,8)) + '</a> Waiting for agent...';
+      replyPoll = setInterval(function() {
+        fetch('/v1/orders/' + oid).then(function(r) { return r.json(); }).then(function(ro) {
+          if (ro.status === 'completed') {
+            done();
+            res.innerHTML = '<div style="color:#00d4aa;margin-bottom:0.3rem">\u2714 <a href="/order/' + esc(oid) + '" style="color:#00d4aa">View reply</a></div><div class="result-box">' + esc(ro.result_text || '') + '</div>';
+            // Reset for next reply
+            document.getElementById('reply-input').value = '';
+            window._currentOrder = ro;
+            window._currentOrder.seller_agent_name = o.seller_agent_name;
+          } else if (ro.status === 'failed') {
+            done();
+            res.innerHTML = '<span style="color:#ff6644">\u2716 Failed. <a href="/order/' + esc(oid) + '" style="color:#555">[view]</a></span>';
+          } else if (ro.status === 'processing') {
+            res.innerHTML = '\u2699 Working... <a href="/order/' + esc(oid) + '" style="color:#555;font-size:0.75rem">[track]</a>';
+          }
+        }).catch(function(){});
+      }, 5000);
+    })
+    .catch(function(err) { done(); res.innerHTML = '<span style="color:#ff6644">' + esc(err.message) + '</span>'; });
+  });
+
+  function done() {
+    if (replyTmr) { clearInterval(replyTmr); replyTmr = null; }
+    if (replyPoll) { clearInterval(replyPoll); replyPoll = null; }
+    ld.className = 'reply-loading';
+    btn.disabled = false;
+  }
+}
+
+document.addEventListener('keydown', function(e) {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); submitReply(); }
+});
 load();
 </script>
 </body>
