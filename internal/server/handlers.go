@@ -1705,9 +1705,15 @@ func (s *Server) handleCreateAdHocOrder(w http.ResponseWriter, r *http.Request) 
 		jsonError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if req.Task == "" || req.BuyerAgentID == "" {
-		jsonError(w, "task and buyer_agent_id required", http.StatusBadRequest)
+	if req.Task == "" {
+		jsonError(w, "task is required", http.StatusBadRequest)
 		return
+	}
+
+	// Use agent's default price if no offer price
+	price := req.OfferPrice
+	if price <= 0 {
+		price = targetAgent.Price
 	}
 
 	orderID := uuid.New().String()
@@ -1716,10 +1722,11 @@ func (s *Server) handleCreateAdHocOrder(w http.ResponseWriter, r *http.Request) 
 		SellerAgentID:   targetAgent.ID,
 		SellerAgentName: targetAgent.Name,
 		BuyerAgentID:    req.BuyerAgentID,
+		BuyerIP:         clientIP(r),
 		BuyerTask:       req.Task,
 		ParentOrderID:   req.ParentOrderID,
-		TotalPrice:      req.OfferPrice,
-		OfferPrice:      req.OfferPrice,
+		TotalPrice:      price,
+		OfferPrice:      price,
 	}
 	if err := s.relay.Store.CreateOrder(order); err != nil {
 		jsonError(w, "internal error", http.StatusInternalServerError)

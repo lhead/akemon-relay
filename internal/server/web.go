@@ -251,94 +251,60 @@ document.addEventListener('keydown', function(e) {
   }
 });
 
+var orderPollTmr = null;
 function submitTask() {
-  if (!cur || cur.status === 'offline') return;
+  if (!cur) return;
   var task = document.getElementById('inp-task').value.trim();
   if (!task) return;
-  var key = document.getElementById('inp-key').value.trim();
-  if (!cur.public && !key) {
-    document.getElementById('inp-key').focus();
-    return;
-  }
 
   var btn = document.getElementById('btn-submit');
   var ld = document.getElementById('loading');
   var rsp = document.getElementById('resp');
   btn.disabled = true;
-  rsp.className = 'resp';
-  rsp.textContent = '';
+  rsp.className = 'resp on';
+  rsp.textContent = 'Placing order...';
   ld.className = 'loading on';
 
   var t0 = Date.now();
   tmr = setInterval(function() {
     var s = Math.floor((Date.now() - t0) / 1000);
     var m = Math.floor(s / 60);
-    var ss = s % 60;
-    document.getElementById('elapsed').textContent = (m > 0 ? m + 'm ' : '') + ss + 's';
+    document.getElementById('elapsed').textContent = (m > 0 ? m + 'm ' : '') + s % 60 + 's';
   }, 1000);
 
-  var hdrs = {'Content-Type': 'application/json'};
-  if (key) hdrs['Authorization'] = 'Bearer ' + key;
-  var ep = '/v1/agent/' + encodeURIComponent(cur.name) + '/mcp';
-
-  function mcpFetch(body) {
-    return fetch(ep, { method: 'POST', headers: hdrs, body: JSON.stringify(body) })
-      .then(function(r) {
-        var sid = r.headers.get('mcp-session-id');
-        if (sid) hdrs['Mcp-Session-Id'] = sid;
-        if (!r.ok) {
-          return r.json().catch(function() { return {}; }).then(function(b) {
-            var msg = b.message || b.error || 'Request failed (HTTP ' + r.status + ')';
-            if (r.status === 401) msg = 'Unauthorized \u2014 check your access key.';
-            if (r.status === 429) msg = 'Agent has reached its daily task limit. Try again later.';
-            if (r.status === 504) msg = 'Agent did not respond in time. It may be busy.';
-            if (r.status === 502) msg = b.message || 'Agent is offline or unreachable.';
-            throw new Error(msg);
-          });
-        }
-        return r.json();
-      });
-  }
-
-  // Step 1: initialize MCP session
-  mcpFetch({
-    jsonrpc: '2.0', id: Date.now(),
-    method: 'initialize',
-    params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'akemon-web', version: '1.0' } }
+  fetch('/v1/agent/' + encodeURIComponent(cur.name) + '/orders', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({task: task})
   })
-  // Step 2: send tools/call
-  .then(function() {
-    return mcpFetch({
-      jsonrpc: '2.0', id: Date.now() + 1,
-      method: 'tools/call',
-      params: { name: 'submit_task', arguments: { task: task } }
-    });
+  .then(function(r) {
+    if (!r.ok) return r.json().then(function(b) { throw new Error(b.error || 'Failed'); });
+    return r.json();
   })
   .then(function(data) {
-    done();
-    var txt = '';
-    var content = data && data.result && data.result.content;
-    if (content) {
-      for (var i = 0; i < content.length; i++) {
-        if (content[i].text) txt += (txt ? '\n' : '') + content[i].text;
-      }
-    }
-    if (!txt && data && data.error) {
-      txt = data.error.message || JSON.stringify(data.error);
-    }
-    rsp.className = 'resp on';
-    rsp.textContent = txt || JSON.stringify(data, null, 2);
+    var oid = data.order_id;
+    rsp.innerHTML = '\u23F3 <a href="/order/' + esc(oid) + '" style="color:#00d4aa">#' + esc(oid.substring(0,8)) + '</a> Waiting for agent...';
+    orderPollTmr = setInterval(function() {
+      fetch('/v1/orders/' + oid).then(function(r){return r.json();}).then(function(o) {
+        if (o.status === 'completed') {
+          done(); rsp.className = 'resp on';
+          rsp.innerHTML = '<div style="color:#00d4aa;margin-bottom:0.3rem">\u2714 Delivered <a href="/order/' + esc(oid) + '" style="color:#555;font-size:0.75rem">[view]</a></div>' + esc(o.result_text || '');
+        } else if (o.status === 'failed') {
+          done(); rsp.className = 'resp on err'; rsp.innerHTML = '\u2716 Agent could not deliver. <a href="/order/' + esc(oid) + '" style="color:#555">[view]</a>';
+        } else if (o.status === 'processing') {
+          rsp.innerHTML = '\u2699 Agent is working... <a href="/order/' + esc(oid) + '" style="color:#555;font-size:0.75rem">[track]</a>';
+        }
+      }).catch(function(){});
+    }, 5000);
   })
   .catch(function(err) {
-    done();
-    rsp.className = 'resp on err';
-    rsp.textContent = err.message || 'Unknown error';
+    done(); rsp.className = 'resp on err'; rsp.textContent = err.message || 'Error';
   });
 
   function done() {
     if (tmr) { clearInterval(tmr); tmr = null; }
-    ld.className = 'loading';
-    btn.disabled = false;
+    if (orderPollTmr) { clearInterval(orderPollTmr); orderPollTmr = null; }
+    ld.className = 'loading'; btn.disabled = false;
   }
 }
 
@@ -718,16 +684,15 @@ function togglePanel(name){
   }
 }
 
-// Task submission (MCP protocol)
-var tmr=null;
+// Task submission (via order system)
+var tmr=null;var orderPoll=null;
 function submitTask(){
   var task=document.getElementById('inp-task').value.trim();
   if(!task)return;
   var btn=document.getElementById('btn-submit');
   var ld=document.getElementById('loading');
   var rsp=document.getElementById('resp');
-  btn.disabled=true;
-  rsp.className='resp';rsp.textContent='';
+  btn.disabled=true;rsp.className='resp on';rsp.textContent='Placing order...';
   ld.className='loading on';
   var t0=Date.now();
   tmr=setInterval(function(){
@@ -736,42 +701,25 @@ function submitTask(){
     document.getElementById('elapsed').textContent=(m>0?m+'m ':'')+s%60+'s';
   },1000);
 
-  var hdrs={'Content-Type':'application/json'};
-  var ep='/v1/agent/'+encodeURIComponent(AN)+'/mcp';
-
-  function mcpFetch(body){
-    return fetch(ep,{method:'POST',headers:hdrs,body:JSON.stringify(body)})
-      .then(function(r){
-        var sid=r.headers.get('mcp-session-id');
-        if(sid)hdrs['Mcp-Session-Id']=sid;
-        if(!r.ok) return r.json().catch(function(){return{};}).then(function(b){
-          throw new Error(b.message||b.error||'Request failed');
-        });
-        return r.json();
-      });
-  }
-
-  mcpFetch({jsonrpc:'2.0',id:Date.now(),method:'initialize',
-    params:{protocolVersion:'2025-03-26',capabilities:{},clientInfo:{name:'akemon-web',version:'1.0'}}
+  fetch('/v1/agent/'+encodeURIComponent(AN)+'/orders',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({task:task})
   })
-  .then(function(){
-    return mcpFetch({jsonrpc:'2.0',id:Date.now()+1,method:'tools/call',
-      params:{name:'submit_task',arguments:{task:task}}
-    });
-  })
+  .then(function(r){if(!r.ok)return r.json().then(function(b){throw new Error(b.error||'Failed');});return r.json();})
   .then(function(data){
-    done();
-    var txt='';
-    var c=data&&data.result&&data.result.content;
-    if(c)for(var i=0;i<c.length;i++){if(c[i].text)txt+=(txt?'\n':'')+c[i].text;}
-    if(!txt&&data&&data.error)txt=data.error.message||JSON.stringify(data.error);
-    rsp.className='resp on';rsp.textContent=txt||JSON.stringify(data,null,2);
+    var oid=data.order_id;
+    rsp.innerHTML='\u23F3 <a href="/order/'+esc(oid)+'" style="color:#00d4aa">#'+esc(oid.substring(0,8))+'</a> Waiting for agent...';
+    orderPoll=setInterval(function(){
+      fetch('/v1/orders/'+oid).then(function(r){return r.json();}).then(function(o){
+        if(o.status==='completed'){done();rsp.className='resp on';rsp.innerHTML='<div style="color:#00d4aa;margin-bottom:0.3rem">\u2714 Delivered <a href="/order/'+esc(oid)+'" style="color:#555;font-size:0.75rem">[view]</a></div>'+esc(o.result_text||'');}
+        else if(o.status==='failed'){done();rsp.className='resp on err';rsp.innerHTML='\u2716 Could not deliver. <a href="/order/'+esc(oid)+'" style="color:#555">[view]</a>';}
+        else if(o.status==='processing'){rsp.innerHTML='\u2699 Working... <a href="/order/'+esc(oid)+'" style="color:#555;font-size:0.75rem">[track]</a>';}
+      }).catch(function(){});
+    },5000);
   })
-  .catch(function(err){
-    done();rsp.className='resp on err';rsp.textContent=err.message||'Error';
-  });
+  .catch(function(err){done();rsp.className='resp on err';rsp.textContent=err.message||'Error';});
 
-  function done(){if(tmr){clearInterval(tmr);tmr=null;}ld.className='loading';btn.disabled=false;}
+  function done(){if(tmr){clearInterval(tmr);tmr=null;}if(orderPoll){clearInterval(orderPoll);orderPoll=null;}ld.className='loading';btn.disabled=false;}
 }
 
 document.addEventListener('keydown',function(e){
@@ -1024,94 +972,44 @@ function renderProfile(a) {
   }
 }
 
+var orderPollTmr2 = null;
 function submitTask() {
-  if (!cur || cur.status === 'offline') return;
+  if (!cur) return;
   var task = document.getElementById('inp-task').value.trim();
   if (!task) return;
-  var keyEl = document.getElementById('inp-key');
-  var key = keyEl ? keyEl.value.trim() : '';
-  if (!cur.public && !key) {
-    if (keyEl) keyEl.focus();
-    return;
-  }
 
   var btn = document.getElementById('btn-submit');
   var ld = document.getElementById('loading');
   var rsp = document.getElementById('resp');
-  btn.disabled = true;
-  rsp.className = 'resp';
-  rsp.textContent = '';
+  btn.disabled = true; rsp.className = 'resp on'; rsp.textContent = 'Placing order...';
   ld.className = 'loading on';
 
   var t0 = Date.now();
   tmr = setInterval(function() {
     var s = Math.floor((Date.now() - t0) / 1000);
     var m = Math.floor(s / 60);
-    var ss = s % 60;
-    document.getElementById('elapsed').textContent = (m > 0 ? m + 'm ' : '') + ss + 's';
+    document.getElementById('elapsed').textContent = (m > 0 ? m + 'm ' : '') + s % 60 + 's';
   }, 1000);
 
-  var hdrs = {'Content-Type': 'application/json'};
-  if (key) hdrs['Authorization'] = 'Bearer ' + key;
-  var ep = '/v1/agent/' + encodeURIComponent(cur.name) + '/mcp';
-
-  function mcpFetch(body) {
-    return fetch(ep, { method: 'POST', headers: hdrs, body: JSON.stringify(body) })
-      .then(function(r) {
-        var sid = r.headers.get('mcp-session-id');
-        if (sid) hdrs['Mcp-Session-Id'] = sid;
-        if (!r.ok) {
-          return r.json().catch(function() { return {}; }).then(function(b) {
-            var msg = b.message || b.error || 'Request failed (HTTP ' + r.status + ')';
-            if (r.status === 401) msg = 'Unauthorized \u2014 check your access key.';
-            if (r.status === 429) msg = 'Agent has reached its daily task limit. Try again later.';
-            if (r.status === 504) msg = 'Agent did not respond in time. It may be busy.';
-            if (r.status === 502) msg = b.message || 'Agent is offline or unreachable.';
-            throw new Error(msg);
-          });
-        }
-        return r.json();
-      });
-  }
-
-  mcpFetch({
-    jsonrpc: '2.0', id: Date.now(),
-    method: 'initialize',
-    params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'akemon-web', version: '1.0' } }
+  fetch('/v1/agent/' + encodeURIComponent(cur.name) + '/orders', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({task: task})
   })
-  .then(function() {
-    return mcpFetch({
-      jsonrpc: '2.0', id: Date.now() + 1,
-      method: 'tools/call',
-      params: { name: 'submit_task', arguments: { task: task } }
-    });
-  })
+  .then(function(r) { if (!r.ok) return r.json().then(function(b) { throw new Error(b.error || 'Failed'); }); return r.json(); })
   .then(function(data) {
-    done();
-    var txt = '';
-    var content = data && data.result && data.result.content;
-    if (content) {
-      for (var i = 0; i < content.length; i++) {
-        if (content[i].text) txt += (txt ? '\n' : '') + content[i].text;
-      }
-    }
-    if (!txt && data && data.error) {
-      txt = data.error.message || JSON.stringify(data.error);
-    }
-    rsp.className = 'resp on';
-    rsp.textContent = txt || JSON.stringify(data, null, 2);
+    var oid = data.order_id;
+    rsp.innerHTML = '\u23F3 <a href="/order/' + esc(oid) + '" style="color:#00d4aa">#' + esc(oid.substring(0,8)) + '</a> Waiting for agent...';
+    orderPollTmr2 = setInterval(function() {
+      fetch('/v1/orders/' + oid).then(function(r){return r.json();}).then(function(o) {
+        if (o.status === 'completed') { done(); rsp.className = 'resp on'; rsp.innerHTML = '<div style="color:#00d4aa;margin-bottom:0.3rem">\u2714 Delivered <a href="/order/' + esc(oid) + '" style="color:#555;font-size:0.75rem">[view]</a></div>' + esc(o.result_text || ''); }
+        else if (o.status === 'failed') { done(); rsp.className = 'resp on err'; rsp.innerHTML = '\u2716 Could not deliver. <a href="/order/' + esc(oid) + '" style="color:#555">[view]</a>'; }
+        else if (o.status === 'processing') { rsp.innerHTML = '\u2699 Working... <a href="/order/' + esc(oid) + '" style="color:#555;font-size:0.75rem">[track]</a>'; }
+      }).catch(function(){});
+    }, 5000);
   })
-  .catch(function(err) {
-    done();
-    rsp.className = 'resp on err';
-    rsp.textContent = err.message || 'Unknown error';
-  });
+  .catch(function(err) { done(); rsp.className = 'resp on err'; rsp.textContent = err.message || 'Error'; });
 
-  function done() {
-    if (tmr) { clearInterval(tmr); tmr = null; }
-    ld.className = 'loading';
-    btn.disabled = false;
-  }
+  function done() { if (tmr) { clearInterval(tmr); tmr = null; } if (orderPollTmr2) { clearInterval(orderPollTmr2); orderPollTmr2 = null; } ld.className = 'loading'; btn.disabled = false; }
 }
 
 document.addEventListener('keydown', function(e) {
@@ -2049,7 +1947,7 @@ function load() {
     for (var i = 0; i < orders.length; i++) {
       var o = orders[i];
       var statusClass = 'status-' + o.status;
-      h += '<div class="order">';
+      h += '<div class="order" onclick="location.href=\'/order/' + esc(o.id) + '\'" style="cursor:pointer">';
       h += '<div class="order-top">';
       var pname = o.product_name || (o.buyer_task ? 'Ad-hoc: ' + o.buyer_task.substring(0, 60) : 'Order');
       h += '<div class="order-product">' + (o.seller_avatar || '\u{1F4E6}') + ' ';
