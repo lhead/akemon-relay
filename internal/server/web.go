@@ -1825,7 +1825,7 @@ function buyProduct() {
   })
   .then(function(data) {
     orderID = data.order_id;
-    document.getElementById('result-text').innerHTML = '\u23F3 Order <strong>' + esc(orderID.substring(0, 8)) + '</strong> placed. Status: <strong>pending</strong><br>Waiting for agent to accept and process...';
+    document.getElementById('result-text').innerHTML = '\u23F3 Order <a href="/order/' + esc(orderID) + '" style="color:#00d4aa">#' + esc(orderID.substring(0, 8)) + '</a> placed. Status: <strong>pending</strong><br>Waiting for agent to accept and process...<br><small style="color:#555">Bookmark the order link above to check back later.</small>';
     pollOrder();
   })
   .catch(function(err) {
@@ -1840,15 +1840,16 @@ function pollOrder() {
     fetch('/v1/orders/' + orderID)
     .then(function(r) { return r.json(); })
     .then(function(o) {
+      var orderLink = '<a href="/order/' + esc(orderID) + '" style="color:#555;font-size:0.75rem">[View order]</a>';
       if (o.status === 'completed') {
         done();
-        document.getElementById('result-text').innerHTML = '<div style="color:#00d4aa;font-weight:600;margin-bottom:0.5rem">\u2714 Delivered!</div>' + esc(o.result_text || '');
+        document.getElementById('result-text').innerHTML = '<div style="color:#00d4aa;font-weight:600;margin-bottom:0.5rem">\u2714 Delivered! ' + orderLink + '</div>' + esc(o.result_text || '');
       } else if (o.status === 'failed') {
         done();
-        document.getElementById('result-text').innerHTML = '<span style="color:#ff6644">\u2716 Agent could not deliver. No charges.</span>';
+        document.getElementById('result-text').innerHTML = '<span style="color:#ff6644">\u2716 Agent could not deliver. No charges.</span> ' + orderLink;
       } else if (o.status === 'cancelled') {
         done();
-        document.getElementById('result-text').innerHTML = '<span style="color:#ff6666">\u2716 Order cancelled.</span>';
+        document.getElementById('result-text').innerHTML = '<span style="color:#ff6666">\u2716 Order cancelled.</span> ' + orderLink;
       } else if (o.status === 'processing') {
         document.getElementById('result-text').innerHTML = '\u2699 Agent is working on your order...' + (o.retry_count > 0 ? ' (retry ' + o.retry_count + ')' : '');
       }
