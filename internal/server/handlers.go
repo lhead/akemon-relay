@@ -541,13 +541,14 @@ func (s *Server) handleUpdateAgentSelf(w http.ResponseWriter, r *http.Request) {
 		Canvas      string `json:"canvas"`
 		Mood        string `json:"mood"`
 		ProfileHTML string `json:"profile_html"`
+		Broadcast   string `json:"broadcast"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		jsonError(w, "invalid json", http.StatusBadRequest)
 		return
 	}
 
-	if err := s.relay.Store.UpdateAgentSelf(agentName, req.SelfIntro, req.Canvas, req.Mood, req.ProfileHTML); err != nil {
+	if err := s.relay.Store.UpdateAgentSelf(agentName, req.SelfIntro, req.Canvas, req.Mood, req.ProfileHTML, req.Broadcast); err != nil {
 		jsonError(w, "db error", http.StatusInternalServerError)
 		return
 	}
@@ -1475,6 +1476,12 @@ func (s *Server) handleBuyProduct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Verify buyer identity if agent-to-agent
+	if !s.verifyBuyerAgent(r, req.BuyerAgentID) {
+		jsonError(w, "unauthorized: buyer_agent_id does not match bearer token", http.StatusUnauthorized)
+		return
+	}
+
 	// Create async order — no credits deducted yet (escrow happens on accept)
 	orderID := uuid.New().String()
 	order := &store.Order{
@@ -1492,6 +1499,11 @@ func (s *Server) handleBuyProduct(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[buy] create order error: %v", err)
 		jsonError(w, "internal error", http.StatusInternalServerError)
 		return
+	}
+
+	// Push notification to agent if online
+	if agent := s.relay.Registry.Get(dbAgent.Name); agent != nil {
+		agent.Send(&relay.RelayMessage{Type: relay.TypeOrderNotify, OrderID: orderID})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1524,25 +1536,23 @@ func (s *Server) handleAcceptOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Escrow: debit buyer credits (if agent buyer), skip for human-origin chain
+	// Atomic escrow + accept
 	price := order.TotalPrice
 	if order.OfferPrice > 0 {
 		price = order.OfferPrice
 	}
-	if order.BuyerAgentID != "" && price > 0 && !order.HumanOrigin {
-		if err := s.relay.Store.DebitAgent(order.BuyerAgentID, price); err != nil {
-			jsonError(w, "buyer has insufficient credits", http.StatusPaymentRequired)
-			return
-		}
-	}
-
-	// Accept with 30 minute timeout
 	escrow := price
+	buyerID := order.BuyerAgentID
 	if order.HumanOrigin {
 		escrow = 0
+		buyerID = "" // skip debit for human-origin
 	}
-	if err := s.relay.Store.AcceptOrder(orderID, escrow, 30); err != nil {
-		jsonError(w, "failed to accept order", http.StatusInternalServerError)
+	if err := s.relay.Store.AcceptOrderWithEscrow(orderID, buyerID, price, escrow, 30); err != nil {
+		if err.Error() == "insufficient credits" {
+			jsonError(w, "buyer has insufficient credits", http.StatusPaymentRequired)
+		} else {
+			jsonError(w, "failed to accept order: "+err.Error(), http.StatusInternalServerError)
+		}
 		return
 	}
 
@@ -1575,28 +1585,18 @@ func (s *Server) handleDeliverOrder(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Result string `json:"result"`
+		Trace  string `json:"trace"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, s.config.MaxMessageBytes)).Decode(&req); err != nil {
 		jsonError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	if err := s.relay.Store.DeliverOrder(orderID, req.Result); err != nil {
-		jsonError(w, "failed to deliver order", http.StatusInternalServerError)
+	// Atomic deliver + credit transfer + counter updates
+	if err := s.relay.Store.DeliverOrderWithCredits(orderID, req.Result, order.SellerAgentID, order.EscrowAmount, order.ProductID, req.Trace); err != nil {
+		jsonError(w, "failed to deliver order: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	// Transfer escrow to seller + platform mint
-	if order.EscrowAmount > 0 {
-		s.relay.Store.MintCredit(order.SellerAgentID, order.EscrowAmount)
-		s.relay.Store.PlatformMint(order.EscrowAmount)
-	}
-
-	// Update product purchase count
-	if order.ProductID != "" {
-		s.relay.Store.IncrementProductPurchases(order.ProductID)
-	}
-	s.relay.Store.IncrementAgentTasks(order.SellerAgentID)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -1729,6 +1729,12 @@ func (s *Server) handleCreateAdHocOrder(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Verify buyer identity if agent-to-agent
+	if !s.verifyBuyerAgent(r, req.BuyerAgentID) {
+		jsonError(w, "unauthorized: buyer_agent_id does not match bearer token", http.StatusUnauthorized)
+		return
+	}
+
 	// Use agent's default price if no offer price
 	price := req.OfferPrice
 	if price <= 0 {
@@ -1761,6 +1767,11 @@ func (s *Server) handleCreateAdHocOrder(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Push notification to agent if online
+	if agent := s.relay.Registry.Get(targetAgent.Name); agent != nil {
+		agent.Send(&relay.RelayMessage{Type: relay.TypeOrderNotify, OrderID: orderID})
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"order_id": orderID,
@@ -1779,18 +1790,42 @@ func (s *Server) handleCancelOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Auth: require buyer or seller
+	if !s.isOrderSeller(r, order) && !s.isOrderBuyer(r, order) {
+		jsonError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Parse optional trace from body
+	var req struct {
+		Trace string `json:"trace"`
+	}
+	json.NewDecoder(io.LimitReader(r.Body, s.config.MaxMessageBytes)).Decode(&req) // best-effort, body may be empty
+
 	switch order.Status {
 	case "pending":
-		s.relay.Store.CancelOrder(orderID)
+		if _, err := s.relay.Store.CancelOrder(orderID); err != nil {
+			jsonError(w, "failed to cancel", http.StatusInternalServerError)
+			return
+		}
 	case "processing":
-		// Refund escrow to buyer
-		if order.BuyerAgentID != "" && order.EscrowAmount > 0 {
+		// Cancel with race guard — only refund if we actually transitioned the status
+		affected, err := s.relay.Store.CancelOrder(orderID)
+		if err != nil {
+			jsonError(w, "failed to cancel", http.StatusInternalServerError)
+			return
+		}
+		if affected > 0 && order.BuyerAgentID != "" && order.EscrowAmount > 0 {
 			s.relay.Store.MintCredit(order.BuyerAgentID, order.EscrowAmount)
 		}
-		s.relay.Store.CancelOrder(orderID)
 	default:
 		jsonError(w, "order cannot be cancelled in state: "+order.Status, http.StatusBadRequest)
 		return
+	}
+
+	// Store trace if provided
+	if req.Trace != "" {
+		s.relay.Store.SetOrderTrace(orderID, req.Trace)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1802,6 +1837,23 @@ func (s *Server) handleCancelOrder(w http.ResponseWriter, r *http.Request) {
 }
 
 // isOrderSeller checks if the request is from the seller agent
+// verifyBuyerAgent checks if bearer token matches the claimed buyer_agent_id.
+// Returns true if buyer_agent_id is empty (human buyer, no auth needed).
+func (s *Server) verifyBuyerAgent(r *http.Request, buyerAgentID string) bool {
+	if buyerAgentID == "" {
+		return true // human buyer, no agent auth
+	}
+	token := auth.ExtractBearer(r)
+	if token == "" {
+		return false
+	}
+	dbAgent, _ := s.relay.Store.GetAgentByID(buyerAgentID)
+	if dbAgent == nil {
+		return false
+	}
+	return auth.VerifyToken(token, dbAgent.SecretHash)
+}
+
 func (s *Server) isOrderSeller(r *http.Request, order *store.Order) bool {
 	token := auth.ExtractBearer(r)
 	if token == "" {
@@ -1821,6 +1873,207 @@ func (s *Server) isOrderSeller(r *http.Request, order *store.Order) bool {
 		}
 	}
 	return false
+}
+
+func (s *Server) isOrderBuyer(r *http.Request, order *store.Order) bool {
+	token := auth.ExtractBearer(r)
+	if token == "" {
+		return false
+	}
+	if order.BuyerAgentID != "" {
+		dbAgent, _ := s.relay.Store.GetAgentByID(order.BuyerAgentID)
+		if dbAgent != nil && auth.VerifyToken(token, dbAgent.SecretHash) {
+			return true
+		}
+	}
+	return false
+}
+
+// --- Agent Tasks (Phase 2) ---
+
+func (s *Server) handleListAgentTasks(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	dbAgent, err := s.relay.Store.GetAgentByName(name)
+	if err != nil || dbAgent == nil {
+		jsonError(w, "agent not found", http.StatusNotFound)
+		return
+	}
+	tasks, err := s.relay.Store.ListPendingTasks(dbAgent.ID)
+	if err != nil {
+		jsonError(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if tasks == nil {
+		tasks = []store.AgentTask{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(tasks)
+}
+
+func (s *Server) handleClaimTask(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	taskID := r.PathValue("id")
+
+	dbAgent, err := s.relay.Store.GetAgentByName(name)
+	if err != nil || dbAgent == nil {
+		jsonError(w, "agent not found", http.StatusNotFound)
+		return
+	}
+
+	// Auth
+	token := auth.ExtractBearer(r)
+	if token == "" || !auth.VerifyToken(token, dbAgent.SecretHash) {
+		jsonError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Verify task belongs to this agent
+	task, err := s.relay.Store.GetAgentTask(taskID)
+	if err != nil || task == nil {
+		jsonError(w, "task not found", http.StatusNotFound)
+		return
+	}
+	if task.AgentID != dbAgent.ID {
+		jsonError(w, "task does not belong to this agent", http.StatusForbidden)
+		return
+	}
+
+	affected, err := s.relay.Store.ClaimTask(taskID)
+	if err != nil {
+		jsonError(w, "failed to claim", http.StatusInternalServerError)
+		return
+	}
+	if affected == 0 {
+		jsonError(w, "task already claimed or not pending", http.StatusConflict)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "task_id": taskID})
+	log.Printf("[tasks] %s claimed task %s (%s)", name, taskID, task.Type)
+}
+
+func (s *Server) handleCompleteTask(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	taskID := r.PathValue("id")
+
+	dbAgent, err := s.relay.Store.GetAgentByName(name)
+	if err != nil || dbAgent == nil {
+		jsonError(w, "agent not found", http.StatusNotFound)
+		return
+	}
+
+	// Auth
+	token := auth.ExtractBearer(r)
+	if token == "" || !auth.VerifyToken(token, dbAgent.SecretHash) {
+		jsonError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	task, err := s.relay.Store.GetAgentTask(taskID)
+	if err != nil || task == nil {
+		jsonError(w, "task not found", http.StatusNotFound)
+		return
+	}
+	if task.AgentID != dbAgent.ID {
+		jsonError(w, "task does not belong to this agent", http.StatusForbidden)
+		return
+	}
+
+	var req struct {
+		Result string `json:"result"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+
+	affected, err := s.relay.Store.CompleteTask(taskID, req.Result)
+	if err != nil {
+		jsonError(w, "failed to complete", http.StatusInternalServerError)
+		return
+	}
+	if affected == 0 {
+		jsonError(w, "task not claimed or already completed", http.StatusConflict)
+		return
+	}
+
+	// Apply result based on task type
+	s.applyTaskResult(dbAgent, task.Type, req.Result)
+
+	// Reward agent
+	s.relay.Store.MintCredit(dbAgent.ID, 3)
+	s.relay.Store.IncrementAgentTasks(dbAgent.ID)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "task_id": taskID})
+	log.Printf("[tasks] %s completed task %s (%s)", name, taskID, task.Type)
+}
+
+// applyTaskResult routes completed task results to existing action handlers
+func (s *Server) applyTaskResult(dbAgent *store.Agent, taskType, result string) {
+	switch taskType {
+	case "product_review":
+		s.applyProductReview(result, dbAgent)
+	case "product_create":
+		s.parseAndCreateProducts(result, dbAgent)
+	case "shopping":
+		s.applyShoppingDecisions(result, dbAgent)
+	case "diagnose_failures":
+		s.applyDiagnoseLessons(result, dbAgent)
+	default:
+		log.Printf("[tasks] unknown task type: %s", taskType)
+	}
+}
+
+func (s *Server) handleProductSummary(w http.ResponseWriter, r *http.Request) {
+	limitStr := r.URL.Query().Get("limit")
+	limit := 30
+	if limitStr != "" {
+		if n, err := strconv.Atoi(limitStr); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+
+	products, err := s.relay.Store.ListAllProducts()
+	if err != nil {
+		jsonError(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// Sort by purchases descending
+	sort.Slice(products, func(i, j int) bool {
+		return products[i].PurchaseCount > products[j].PurchaseCount
+	})
+
+	// Limit
+	if len(products) > limit {
+		products = products[:limit]
+	}
+
+	// Return summary only (no detail_markdown)
+	type summary struct {
+		ID         string `json:"id"`
+		Name       string `json:"name"`
+		AgentName  string `json:"agent_name"`
+		Price      int    `json:"price"`
+		Purchases  int    `json:"purchases"`
+		Desc       string `json:"description"`
+	}
+	result := make([]summary, len(products))
+	for i, p := range products {
+		result[i] = summary{
+			ID:        p.ID,
+			Name:      p.Name,
+			AgentName: p.AgentName,
+			Price:     p.Price,
+			Purchases: p.PurchaseCount,
+			Desc:      p.Description,
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
 }
 
 func (s *Server) handleListOrders(w http.ResponseWriter, r *http.Request) {
@@ -1846,6 +2099,12 @@ func (s *Server) handleSubmitReview(w http.ResponseWriter, r *http.Request) {
 	}
 	if order.Status != "completed" {
 		jsonError(w, "can only review completed orders", http.StatusBadRequest)
+		return
+	}
+
+	// Auth: only the buyer can review
+	if !s.isOrderBuyer(r, order) {
+		jsonError(w, "unauthorized: only the buyer can review", http.StatusUnauthorized)
 		return
 	}
 
@@ -2071,4 +2330,315 @@ func (s *Server) callAgentMCP(agent *relay.ConnectedAgent, dbAgent *store.Agent,
 		s.relay.Store.RecordTask(uuid.New().String(), dbAgent.ID, "timeout", callerIP, int(s.config.RequestTimeout.Milliseconds()))
 		return "", fmt.Errorf("agent did not respond in time")
 	}
+}
+
+// --- Execution Logs ---
+
+func (s *Server) handleCreateExecutionLog(w http.ResponseWriter, r *http.Request) {
+	agentName := r.PathValue("name")
+
+	// Auth: must be the agent itself
+	agent, err := s.relay.Store.GetAgentByName(agentName)
+	if err != nil || agent == nil {
+		jsonError(w, "agent not found", http.StatusNotFound)
+		return
+	}
+	token := auth.ExtractBearer(r)
+	if token == "" || !auth.VerifyToken(token, agent.SecretHash) {
+		jsonError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		Type  string `json:"type"`
+		RefID string `json:"ref_id"`
+		Status string `json:"status"`
+		Error string `json:"error"`
+		Trace string `json:"trace"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 100_000)).Decode(&req); err != nil {
+		jsonError(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if req.Type == "" || req.Status == "" {
+		jsonError(w, "type and status required", http.StatusBadRequest)
+		return
+	}
+
+	l := &store.ExecutionLog{
+		ID:        uuid.New().String(),
+		AgentID:   agent.ID,
+		AgentName: agentName,
+		Type:      req.Type,
+		RefID:     req.RefID,
+		Status:    req.Status,
+		Error:     req.Error,
+		Trace:     req.Trace,
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := s.relay.Store.CreateExecutionLog(l); err != nil {
+		jsonError(w, "failed to create log: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "id": l.ID})
+}
+
+func (s *Server) handleListExecutionLogs(w http.ResponseWriter, r *http.Request) {
+	agentName := r.PathValue("name")
+	status := r.URL.Query().Get("status")
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 200 {
+			limit = n
+		}
+	}
+
+	logs, err := s.relay.Store.ListExecutionLogs(agentName, status, limit)
+	if err != nil {
+		jsonError(w, "failed to list logs: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if logs == nil {
+		logs = []store.ExecutionLog{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(logs)
+}
+
+// --- Owner Dashboard ---
+
+func (s *Server) handleListAccountAgents(w http.ResponseWriter, r *http.Request) {
+	token := auth.ExtractBearer(r)
+	if token == "" {
+		jsonError(w, "authorization required", http.StatusUnauthorized)
+		return
+	}
+
+	// Find which agent this token belongs to, then get account_id
+	allAgents, err := s.relay.Store.ListAgents()
+	if err != nil {
+		jsonError(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	var accountID string
+	for _, a := range allAgents {
+		agent, err := s.relay.Store.GetAgentByName(a.Name)
+		if err != nil || agent == nil {
+			continue
+		}
+		if auth.VerifyToken(token, agent.SecretHash) {
+			accountID = agent.AccountID
+			break
+		}
+	}
+	if accountID == "" {
+		jsonError(w, "invalid token", http.StatusUnauthorized)
+		return
+	}
+
+	agents, err := s.relay.Store.ListAgentsByAccount(accountID)
+	if err != nil {
+		jsonError(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// Build response with online status
+	type ownerAgent struct {
+		store.AgentListing
+		Status string `json:"status"`
+	}
+	out := make([]ownerAgent, len(agents))
+	for i, a := range agents {
+		status := "offline"
+		if s.relay.Registry.Get(a.Name) != nil {
+			status = "online"
+		}
+		out[i] = ownerAgent{AgentListing: a, Status: status}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"account_id": accountID,
+		"agents":     out,
+	})
+}
+
+// --- World Feed ---
+
+func (s *Server) handleFeed(w http.ResponseWriter, r *http.Request) {
+	since := time.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339)
+
+	newAgents, _ := s.relay.Store.FeedNewAgents(since, 10)
+	newProducts, _ := s.relay.Store.FeedNewProducts(since, 10)
+	creations, _ := s.relay.Store.FeedRecentCreations(since, 10)
+	stats, _ := s.relay.Store.FeedOrderStats(since)
+	broadcasts, _ := s.relay.Store.FeedRandomBroadcasts(5)
+
+	// Online agents count
+	onlineNames := s.relay.Registry.Online()
+	stats.ActiveAgents = len(onlineNames)
+
+	if newAgents == nil {
+		newAgents = []store.FeedNewAgent{}
+	}
+	if newProducts == nil {
+		newProducts = []store.FeedNewProduct{}
+	}
+	if creations == nil {
+		creations = []store.FeedCreation{}
+	}
+	if broadcasts == nil {
+		broadcasts = []store.FeedBroadcast{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"since":        since,
+		"new_agents":   newAgents,
+		"new_products": newProducts,
+		"creations":    creations,
+		"stats":        stats,
+		"broadcasts":   broadcasts,
+	})
+}
+
+// --- Teaching System ---
+
+func (s *Server) handleListRecentFailures(w http.ResponseWriter, r *http.Request) {
+	limit := 20
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+	logs, err := s.relay.Store.ListRecentFailures(limit)
+	if err != nil {
+		jsonError(w, "failed to list failures: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if logs == nil {
+		logs = []store.ExecutionLog{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(logs)
+}
+
+func (s *Server) handleCreateLesson(w http.ResponseWriter, r *http.Request) {
+	targetAgent := r.PathValue("name")
+
+	// Auth: any authenticated agent can create a lesson for another agent
+	token := auth.ExtractBearer(r)
+	if token == "" {
+		jsonError(w, "authorization required", http.StatusUnauthorized)
+		return
+	}
+	// Find the diagnosing agent
+	allAgents, err := s.relay.Store.ListAgents()
+	if err != nil {
+		jsonError(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	var diagnoserName string
+	for _, a := range allAgents {
+		agent, err := s.relay.Store.GetAgentByName(a.Name)
+		if err != nil || agent == nil {
+			continue
+		}
+		if auth.VerifyToken(token, agent.SecretHash) {
+			diagnoserName = agent.Name
+			break
+		}
+	}
+	if diagnoserName == "" {
+		jsonError(w, "invalid token", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		Topic   string `json:"topic"`
+		Content string `json:"content"`
+		LogID   string `json:"log_id"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 50_000)).Decode(&req); err != nil {
+		jsonError(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if req.Topic == "" || req.Content == "" {
+		jsonError(w, "topic and content required", http.StatusBadRequest)
+		return
+	}
+
+	l := &store.Lesson{
+		ID:          uuid.New().String(),
+		AgentName:   targetAgent,
+		Topic:       req.Topic,
+		Content:     req.Content,
+		DiagnosedBy: diagnoserName,
+		LogID:       req.LogID,
+		CreatedAt:   time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := s.relay.Store.CreateLesson(l); err != nil {
+		jsonError(w, "failed to create lesson: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "id": l.ID})
+}
+
+func (s *Server) handleListLessons(w http.ResponseWriter, r *http.Request) {
+	agentName := r.PathValue("name")
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 200 {
+			limit = n
+		}
+	}
+	lessons, err := s.relay.Store.ListLessons(agentName, limit)
+	if err != nil {
+		jsonError(w, "failed to list lessons: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if lessons == nil {
+		lessons = []store.Lesson{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(lessons)
+}
+
+func (s *Server) handleListAccountAgentsByID(w http.ResponseWriter, r *http.Request) {
+	accountID := r.PathValue("id")
+	if accountID == "" {
+		jsonError(w, "account id required", http.StatusBadRequest)
+		return
+	}
+
+	agents, err := s.relay.Store.ListAgentsByAccount(accountID)
+	if err != nil {
+		jsonError(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	type ownerAgent struct {
+		store.AgentListing
+		Status string `json:"status"`
+	}
+	out := make([]ownerAgent, len(agents))
+	for i, a := range agents {
+		status := "offline"
+		if s.relay.Registry.Get(a.Name) != nil {
+			status = "online"
+		}
+		out[i] = ownerAgent{AgentListing: a, Status: status}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"account_id": accountID,
+		"agents":     out,
+	})
 }

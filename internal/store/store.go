@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"math"
 	"time"
 
@@ -14,7 +15,7 @@ type Store struct {
 }
 
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)")
+	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, err
 	}
@@ -127,9 +128,54 @@ func (s *Store) Migrate() error {
 	s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_orders_parent ON orders(parent_order_id)`)
 	s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_orders_timeout ON orders(timeout_at)`)
 	s.db.Exec(`ALTER TABLE orders ADD COLUMN human_origin INTEGER DEFAULT 0`)
+	s.db.Exec(`ALTER TABLE orders ADD COLUMN trace TEXT DEFAULT ''`)
 	// Migrate old pending orders: those with results → completed, without → cancelled
 	s.db.Exec(`UPDATE orders SET status = 'completed', completed_at = created_at WHERE status = 'pending' AND result_text != '' AND result_text IS NOT NULL`)
 	s.db.Exec(`UPDATE orders SET status = 'cancelled', completed_at = created_at WHERE status = 'pending' AND (result_text = '' OR result_text IS NULL)`)
+
+	// Agent tasks table (Phase 2 — relay writes, agent polls)
+	s.db.Exec(`CREATE TABLE IF NOT EXISTS agent_tasks (
+		id TEXT PRIMARY KEY,
+		agent_id TEXT NOT NULL,
+		type TEXT NOT NULL,
+		payload TEXT DEFAULT '{}',
+		status TEXT DEFAULT 'pending',
+		result TEXT DEFAULT '',
+		created_at TEXT NOT NULL,
+		claimed_at TEXT DEFAULT '',
+		completed_at TEXT DEFAULT ''
+	)`)
+	s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_agent_tasks_agent ON agent_tasks(agent_id, status)`)
+
+	// Execution logs — trace every task execution for observability & teaching
+	s.db.Exec(`CREATE TABLE IF NOT EXISTS execution_logs (
+		id TEXT PRIMARY KEY,
+		agent_id TEXT NOT NULL,
+		agent_name TEXT NOT NULL,
+		type TEXT NOT NULL,
+		ref_id TEXT DEFAULT '',
+		status TEXT NOT NULL,
+		error TEXT DEFAULT '',
+		trace TEXT DEFAULT '',
+		created_at TEXT NOT NULL
+	)`)
+	s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_exlogs_agent ON execution_logs(agent_name, created_at)`)
+	s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_exlogs_status ON execution_logs(agent_name, status)`)
+
+	// Broadcast field on agents
+	s.db.Exec(`ALTER TABLE agents ADD COLUMN latest_broadcast TEXT DEFAULT ''`)
+
+	// Lessons table — teaching system: strong agents diagnose weak agent failures
+	s.db.Exec(`CREATE TABLE IF NOT EXISTS lessons (
+		id TEXT PRIMARY KEY,
+		agent_name TEXT NOT NULL,
+		topic TEXT NOT NULL,
+		content TEXT NOT NULL,
+		diagnosed_by TEXT NOT NULL,
+		log_id TEXT DEFAULT '',
+		created_at TEXT NOT NULL
+	)`)
+	s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_lessons_agent ON lessons(agent_name, created_at)`)
 
 	return nil
 }
@@ -163,14 +209,25 @@ func (s *Store) migrateOrdersDropProductNotNull() {
 
 	tx, err := s.db.Begin()
 	if err != nil {
+		log.Printf("[migrate] failed to begin transaction: %v", err)
 		return
 	}
 	defer tx.Rollback()
+
 	// Must disable foreign keys inside the migration (can't change mid-transaction on some drivers)
-	tx.Exec(`PRAGMA foreign_keys = OFF`)
-	tx.Exec(`CREATE TABLE orders_new AS SELECT * FROM orders`)
-	tx.Exec(`DROP TABLE orders`)
-	tx.Exec(`CREATE TABLE orders (
+	if _, err := tx.Exec(`PRAGMA foreign_keys = OFF`); err != nil {
+		log.Printf("[migrate] failed to disable foreign keys: %v", err)
+		return
+	}
+	if _, err := tx.Exec(`CREATE TABLE orders_new AS SELECT * FROM orders`); err != nil {
+		log.Printf("[migrate] failed to copy orders to orders_new: %v", err)
+		return
+	}
+	if _, err := tx.Exec(`DROP TABLE orders`); err != nil {
+		log.Printf("[migrate] failed to drop old orders table: %v", err)
+		return
+	}
+	if _, err := tx.Exec(`CREATE TABLE orders (
 		id             TEXT PRIMARY KEY,
 		product_id     TEXT DEFAULT '' REFERENCES products(id),
 		buyer_agent_id TEXT DEFAULT '',
@@ -193,16 +250,47 @@ func (s *Store) migrateOrdersDropProductNotNull() {
 		accepted_at       TEXT DEFAULT '',
 		failed_at         TEXT DEFAULT '',
 		human_origin      INTEGER DEFAULT 0
-	)`)
-	tx.Exec(`INSERT INTO orders SELECT *, 0 FROM orders_new`)
-	tx.Exec(`DROP TABLE orders_new`)
-	tx.Exec(`CREATE INDEX IF NOT EXISTS idx_orders_product ON orders(product_id)`)
-	tx.Exec(`CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)`)
-	tx.Exec(`CREATE INDEX IF NOT EXISTS idx_orders_seller ON orders(seller_agent_id)`)
-	tx.Exec(`CREATE INDEX IF NOT EXISTS idx_orders_parent ON orders(parent_order_id)`)
-	tx.Exec(`CREATE INDEX IF NOT EXISTS idx_orders_timeout ON orders(timeout_at)`)
-	tx.Exec(`PRAGMA foreign_keys = ON`)
-	tx.Commit()
+	)`); err != nil {
+		log.Printf("[migrate] failed to create new orders table: %v", err)
+		return
+	}
+	if _, err := tx.Exec(`INSERT INTO orders SELECT *, 0 FROM orders_new`); err != nil {
+		log.Printf("[migrate] failed to copy data into new orders table: %v", err)
+		return
+	}
+	if _, err := tx.Exec(`DROP TABLE orders_new`); err != nil {
+		log.Printf("[migrate] failed to drop orders_new: %v", err)
+		return
+	}
+	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_orders_product ON orders(product_id)`); err != nil {
+		log.Printf("[migrate] failed to create idx_orders_product: %v", err)
+		return
+	}
+	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)`); err != nil {
+		log.Printf("[migrate] failed to create idx_orders_status: %v", err)
+		return
+	}
+	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_orders_seller ON orders(seller_agent_id)`); err != nil {
+		log.Printf("[migrate] failed to create idx_orders_seller: %v", err)
+		return
+	}
+	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_orders_parent ON orders(parent_order_id)`); err != nil {
+		log.Printf("[migrate] failed to create idx_orders_parent: %v", err)
+		return
+	}
+	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_orders_timeout ON orders(timeout_at)`); err != nil {
+		log.Printf("[migrate] failed to create idx_orders_timeout: %v", err)
+		return
+	}
+	if _, err := tx.Exec(`PRAGMA foreign_keys = ON`); err != nil {
+		log.Printf("[migrate] failed to re-enable foreign keys: %v", err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		log.Printf("[migrate] failed to commit orders migration: %v", err)
+		return
+	}
+	log.Printf("[migrate] successfully dropped NOT NULL on orders.product_id")
 }
 
 // --- Accounts ---
@@ -335,7 +423,7 @@ func (s *Store) CreateAgent(a *Agent) error {
 	return err
 }
 
-func (s *Store) UpdateAgentOnConnect(name, description, engine string, public bool, tags string, price int) error {
+func (s *Store) UpdateAgentOnConnect(name, description, engine string, public bool, tags string, price int, avatar string) error {
 	pub := 0
 	if public {
 		pub = 1
@@ -344,6 +432,12 @@ func (s *Store) UpdateAgentOnConnect(name, description, engine string, public bo
 		price = 1
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
+	if avatar != "" {
+		_, err := s.db.Exec(`
+			UPDATE agents SET description = ?, engine = ?, public = ?, last_connected = ?, tags = ?, price = ?, avatar = ? WHERE name = ?
+		`, description, engine, pub, now, tags, price, avatar, name)
+		return err
+	}
 	_, err := s.db.Exec(`
 		UPDATE agents SET description = ?, engine = ?, public = ?, last_connected = ?, tags = ?, price = ? WHERE name = ?
 	`, description, engine, pub, now, tags, price, name)
@@ -376,7 +470,12 @@ func (s *Store) UpdateAgentPrice(name string, price int) error {
 	return err
 }
 
-func (s *Store) UpdateAgentSelf(name, selfIntro, canvas, mood, profileHTML string) error {
+func (s *Store) UpdateAgentSelf(name, selfIntro, canvas, mood, profileHTML, broadcast string) error {
+	if broadcast != "" {
+		_, err := s.db.Exec(`UPDATE agents SET self_intro = ?, canvas = ?, mood = ?, profile_html = ?, latest_broadcast = ? WHERE name = ?`,
+			selfIntro, canvas, mood, profileHTML, broadcast, name)
+		return err
+	}
 	_, err := s.db.Exec(`UPDATE agents SET self_intro = ?, canvas = ?, mood = ?, profile_html = ? WHERE name = ?`,
 		selfIntro, canvas, mood, profileHTML, name)
 	return err
@@ -423,6 +522,39 @@ func (s *Store) DebitAgent(agentID string, amount int) error {
 		return fmt.Errorf("insufficient credits")
 	}
 	return nil
+}
+
+// AgentToAgentTransfer atomically debits caller and credits callee.
+// Returns the price transferred. Fails if caller has insufficient credits.
+func (s *Store) AgentToAgentTransfer(callerAgentID, calleeAgentID string) (int, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	// Get callee price
+	var price int
+	if err := tx.QueryRow(`SELECT COALESCE(price, 1) FROM agents WHERE id = ?`, calleeAgentID).Scan(&price); err != nil {
+		return 0, fmt.Errorf("callee lookup: %w", err)
+	}
+
+	// Debit caller (fails if insufficient)
+	res, err := tx.Exec(`UPDATE agents SET credits = credits - ? WHERE id = ? AND credits >= ?`, price, callerAgentID, price)
+	if err != nil {
+		return 0, fmt.Errorf("debit: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return 0, fmt.Errorf("insufficient credits")
+	}
+
+	// Credit callee
+	if _, err := tx.Exec(`UPDATE agents SET credits = COALESCE(credits, 0) + ? WHERE id = ?`, price, calleeAgentID); err != nil {
+		return 0, fmt.Errorf("credit: %w", err)
+	}
+
+	return price, tx.Commit()
 }
 
 // --- Account Credits ---
@@ -515,6 +647,47 @@ func (s *Store) ListAgents() ([]AgentListing, error) {
 		FROM agents a
 		ORDER BY a.total_tasks DESC
 	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var agents []AgentListing
+	for rows.Next() {
+		var a AgentListing
+		var pub int
+		var avgMs float64
+		if err := rows.Scan(&a.Name, &a.Description, &a.AccountID, &a.Engine, &a.Avatar,
+			&pub, &a.MaxTasks, &a.TotalTasks, &a.FirstRegistered, &a.LastConnected,
+			&a.Tags, &a.Credits, &a.Price, &a.SuccessfulTasks, &avgMs,
+			&a.SelfIntro, &a.Canvas, &a.Mood, &a.ProfileHTML, &a.ProductCount); err != nil {
+			return nil, err
+		}
+		a.Public = pub == 1
+		a.Level = computeLevel(a.SuccessfulTasks)
+		a.AvgResponseMs = int(avgMs)
+		if a.TotalTasks > 0 {
+			a.SuccessRate = float64(a.SuccessfulTasks) / float64(a.TotalTasks)
+		}
+		agents = append(agents, a)
+	}
+	return agents, rows.Err()
+}
+
+func (s *Store) ListAgentsByAccount(accountID string) ([]AgentListing, error) {
+	rows, err := s.db.Query(`
+		SELECT
+			a.name, a.description, a.account_id, a.engine, a.avatar,
+			a.public, a.max_tasks, a.total_tasks, a.first_registered, a.last_connected,
+			COALESCE(a.tags, ''), COALESCE(a.credits, 100), COALESCE(a.price, 1),
+			COALESCE((SELECT COUNT(*) FROM tasks t WHERE t.agent_id = a.id AND t.status = 'ok'), 0) as successful_tasks,
+			COALESCE((SELECT AVG(t.duration_ms) FROM tasks t WHERE t.agent_id = a.id AND t.status = 'ok'), 0) as avg_ms,
+			COALESCE(a.self_intro, ''), COALESCE(a.canvas, ''), COALESCE(a.mood, ''),
+			COALESCE(a.profile_html, ''),
+			COALESCE((SELECT COUNT(*) FROM products p WHERE p.agent_id = a.id AND p.status = 'active'), 0) as product_count
+		FROM agents a WHERE a.account_id = ?
+		ORDER BY a.total_tasks DESC
+	`, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -745,8 +918,9 @@ func (s *Store) UpsertGame(agentName, slug, title, description, html string) err
 	_, err := s.db.Exec(`
 		INSERT INTO agent_games (agent_name, slug, title, description, html, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(agent_name, slug) DO UPDATE SET title = ?, description = ?, html = ?, updated_at = ?
-	`, agentName, slug, title, description, html, now, now, title, description, html, now)
+		ON CONFLICT(agent_name, slug) DO UPDATE SET title = excluded.title, description = excluded.description, html = excluded.html,
+		  updated_at = CASE WHEN html != excluded.html OR title != excluded.title THEN ? ELSE updated_at END
+	`, agentName, slug, title, description, html, now, now, now)
 	return err
 }
 
@@ -768,7 +942,7 @@ func (s *Store) GetGame(agentName, slug string) (*AgentGame, error) {
 func (s *Store) ListGames(agentName string) ([]AgentGame, error) {
 	rows, err := s.db.Query(`
 		SELECT agent_name, slug, title, description, html, created_at, updated_at
-		FROM agent_games WHERE agent_name = ? ORDER BY created_at ASC
+		FROM agent_games WHERE agent_name = ? ORDER BY updated_at DESC
 	`, agentName)
 	if err != nil {
 		return nil, err
@@ -806,8 +980,9 @@ func (s *Store) UpsertNote(agentName, slug, title, content string) error {
 	_, err := s.db.Exec(`
 		INSERT INTO agent_notes (agent_name, slug, title, content, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(agent_name, slug) DO UPDATE SET title=excluded.title, content=excluded.content, updated_at=excluded.updated_at
-	`, agentName, slug, title, content, now, now)
+		ON CONFLICT(agent_name, slug) DO UPDATE SET title=excluded.title, content=excluded.content,
+		  updated_at = CASE WHEN content != excluded.content OR title != excluded.title THEN ? ELSE updated_at END
+	`, agentName, slug, title, content, now, now, now)
 	return err
 }
 
@@ -865,8 +1040,9 @@ func (s *Store) UpsertPage(agentName, slug, title, description, html string) err
 	_, err := s.db.Exec(`
 		INSERT INTO agent_pages (agent_name, slug, title, description, html, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(agent_name, slug) DO UPDATE SET title=excluded.title, description=excluded.description, html=excluded.html, updated_at=excluded.updated_at
-	`, agentName, slug, title, description, html, now, now)
+		ON CONFLICT(agent_name, slug) DO UPDATE SET title=excluded.title, description=excluded.description, html=excluded.html,
+		  updated_at = CASE WHEN html != excluded.html OR title != excluded.title THEN ? ELSE updated_at END
+	`, agentName, slug, title, description, html, now, now, now)
 	return err
 }
 
@@ -885,7 +1061,7 @@ func (s *Store) GetPage(agentName, slug string) (*AgentPage, error) {
 func (s *Store) ListPages(agentName string) ([]AgentPage, error) {
 	rows, err := s.db.Query(`
 		SELECT agent_name, slug, title, description, html, created_at, updated_at
-		FROM agent_pages WHERE agent_name = ? ORDER BY created_at ASC
+		FROM agent_pages WHERE agent_name = ? ORDER BY updated_at DESC
 	`, agentName)
 	if err != nil {
 		return nil, err
@@ -932,6 +1108,7 @@ type Order struct {
 	CompletedAt     string `json:"completed_at,omitempty"`
 	FailedAt        string `json:"failed_at,omitempty"`
 	HumanOrigin     bool   `json:"human_origin,omitempty"`
+	Trace           string `json:"trace,omitempty"`
 }
 
 func (s *Store) CreateOrder(o *Order) error {
@@ -959,14 +1136,14 @@ func (s *Store) GetOrder(id string) (*Order, error) {
 		       COALESCE(deposit, 0), COALESCE(total_price, 0), COALESCE(offer_price, 0), COALESCE(escrow_amount, 0),
 		       COALESCE(status, ''), COALESCE(result_text, ''), COALESCE(retry_count, 0), COALESCE(max_retries, 5),
 		       COALESCE(timeout_at, ''), COALESCE(created_at, ''), COALESCE(accepted_at, ''), COALESCE(completed_at, ''), COALESCE(failed_at, ''),
-		       COALESCE(human_origin, 0)
+		       COALESCE(human_origin, 0), COALESCE(trace, '')
 		FROM orders WHERE id = ?
 	`, id).Scan(&o.ID, &o.ProductID, &o.SellerAgentID, &o.SellerAgentName,
 		&o.BuyerAgentID, &o.BuyerIP, &o.BuyerTask, &o.ParentOrderID,
 		&o.Deposit, &o.TotalPrice, &o.OfferPrice, &o.EscrowAmount,
 		&o.Status, &o.ResultText, &o.RetryCount, &o.MaxRetries,
 		&o.TimeoutAt, &o.CreatedAt, &o.AcceptedAt, &o.CompletedAt, &o.FailedAt,
-		&o.HumanOrigin)
+		&o.HumanOrigin, &o.Trace)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -983,7 +1160,7 @@ func (s *Store) ListChildOrders(parentID string) ([]*Order, error) {
 		       COALESCE(deposit, 0), COALESCE(total_price, 0), COALESCE(offer_price, 0), COALESCE(escrow_amount, 0),
 		       COALESCE(status, ''), COALESCE(result_text, ''), COALESCE(retry_count, 0), COALESCE(max_retries, 5),
 		       COALESCE(timeout_at, ''), COALESCE(created_at, ''), COALESCE(accepted_at, ''), COALESCE(completed_at, ''), COALESCE(failed_at, ''),
-		       COALESCE(human_origin, 0)
+		       COALESCE(human_origin, 0), COALESCE(trace, '')
 		FROM orders WHERE parent_order_id = ? ORDER BY created_at ASC
 	`, parentID)
 	if err != nil {
@@ -998,7 +1175,7 @@ func (s *Store) ListChildOrders(parentID string) ([]*Order, error) {
 			&o.Deposit, &o.TotalPrice, &o.OfferPrice, &o.EscrowAmount,
 			&o.Status, &o.ResultText, &o.RetryCount, &o.MaxRetries,
 			&o.TimeoutAt, &o.CreatedAt, &o.AcceptedAt, &o.CompletedAt, &o.FailedAt,
-			&o.HumanOrigin); err != nil {
+			&o.HumanOrigin, &o.Trace); err != nil {
 			return nil, err
 		}
 		out = append(out, o)
@@ -1017,10 +1194,13 @@ func (s *Store) CompleteOrder(id string) error {
 	return err
 }
 
-func (s *Store) CancelOrder(id string) error {
+func (s *Store) CancelOrder(id string) (int64, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(`UPDATE orders SET status = 'cancelled', completed_at = ? WHERE id = ?`, now, id)
-	return err
+	res, err := s.db.Exec(`UPDATE orders SET status = 'cancelled', completed_at = ? WHERE id = ? AND status IN ('pending', 'processing')`, now, id)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 // AcceptOrder transitions pending → processing, sets escrow and timeout
@@ -1044,23 +1224,127 @@ func (s *Store) DeliverOrder(id, resultText string) error {
 	return err
 }
 
-// FailOrder transitions processing → failed
-func (s *Store) FailOrder(id string) error {
+// FailOrder transitions processing → failed, returns rows affected
+func (s *Store) FailOrder(id string, trace ...string) (int64, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(`
-		UPDATE orders SET status = 'failed', failed_at = ?
+	traceText := ""
+	if len(trace) > 0 {
+		traceText = trace[0]
+	}
+	res, err := s.db.Exec(`
+		UPDATE orders SET status = 'failed', failed_at = ?, trace = ?
 		WHERE id = ? AND status = 'processing'
-	`, now, id)
+	`, now, traceText, id)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// SetOrderTrace updates just the trace column on any order
+func (s *Store) SetOrderTrace(id string, trace string) error {
+	_, err := s.db.Exec(`UPDATE orders SET trace = ? WHERE id = ?`, trace, id)
 	return err
 }
 
-// ExtendOrderTimeout adds minutes to timeout_at (max 24h from accepted_at)
+// AcceptOrderWithEscrow atomically debits buyer and accepts order
+func (s *Store) AcceptOrderWithEscrow(orderID string, buyerAgentID string, price int, escrowAmount int, timeoutMinutes int) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Debit buyer if applicable
+	if buyerAgentID != "" && price > 0 {
+		res, err := tx.Exec(`UPDATE agents SET credits = credits - ? WHERE id = ? AND credits >= ?`, price, buyerAgentID, price)
+		if err != nil {
+			return err
+		}
+		n, _ := res.RowsAffected()
+		if n == 0 {
+			return fmt.Errorf("insufficient credits")
+		}
+	}
+
+	// Transition order to processing
+	now := time.Now().UTC()
+	timeout := now.Add(time.Duration(timeoutMinutes) * time.Minute)
+	res, err := tx.Exec(`
+		UPDATE orders SET status = 'processing', escrow_amount = ?, accepted_at = ?, timeout_at = ?
+		WHERE id = ? AND status = 'pending'
+	`, escrowAmount, now.Format(time.RFC3339), timeout.Format(time.RFC3339), orderID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("order not pending")
+	}
+
+	return tx.Commit()
+}
+
+// DeliverOrderWithCredits atomically delivers order, mints credits, and updates counters
+func (s *Store) DeliverOrderWithCredits(orderID string, resultText string, sellerAgentID string, escrowAmount int, productID string, trace ...string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Deliver order
+	now := time.Now().UTC().Format(time.RFC3339)
+	traceText := ""
+	if len(trace) > 0 {
+		traceText = trace[0]
+	}
+	res, err := tx.Exec(`
+		UPDATE orders SET status = 'completed', result_text = ?, completed_at = ?, trace = ?
+		WHERE id = ? AND status = 'processing'
+	`, resultText, now, traceText, orderID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("order not processing")
+	}
+
+	// Mint credits to seller + platform
+	if escrowAmount > 0 {
+		if _, err := tx.Exec(`UPDATE agents SET credits = COALESCE(credits, 0) + ? WHERE id = ?`, escrowAmount, sellerAgentID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE platform_account SET credits = credits + ? WHERE id = 1`, escrowAmount); err != nil {
+			return err
+		}
+	}
+
+	// Update counters
+	if productID != "" {
+		tx.Exec(`UPDATE products SET purchase_count = purchase_count + 1 WHERE id = ?`, productID)
+	}
+	tx.Exec(`UPDATE agents SET total_tasks = total_tasks + 1 WHERE id = ?`, sellerAgentID)
+
+	return tx.Commit()
+}
+
+// ExtendOrderTimeout adds minutes to timeout_at, capped at 24h from accepted_at
 func (s *Store) ExtendOrderTimeout(id string, addMinutes int) error {
-	_, err := s.db.Exec(`
+	res, err := s.db.Exec(`
 		UPDATE orders SET timeout_at = datetime(timeout_at, '+' || ? || ' minutes')
 		WHERE id = ? AND status = 'processing'
-	`, addMinutes, id)
-	return err
+		AND datetime(timeout_at, '+' || ? || ' minutes') <= datetime(accepted_at, '+24 hours')
+	`, addMinutes, id, addMinutes)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("extension exceeds 24h cap or order not processing")
+	}
+	return nil
 }
 
 // IncrementOrderRetry bumps retry_count and extends timeout
@@ -1109,6 +1393,87 @@ func (s *Store) GetAgentSuccessRate(agentID string) (int, int, error) {
 	s.db.QueryRow(`SELECT COUNT(*) FROM orders WHERE seller_agent_id = ? AND status = 'completed'`, agentID).Scan(&completed)
 	s.db.QueryRow(`SELECT COUNT(*) FROM orders WHERE seller_agent_id = ? AND status = 'failed'`, agentID).Scan(&failed)
 	return completed, completed + failed, nil
+}
+
+// --- Agent Tasks (Phase 2) ---
+
+type AgentTask struct {
+	ID          string `json:"id"`
+	AgentID     string `json:"agent_id"`
+	Type        string `json:"type"`
+	Payload     string `json:"payload"`
+	Status      string `json:"status"`
+	Result      string `json:"result"`
+	CreatedAt   string `json:"created_at"`
+	ClaimedAt   string `json:"claimed_at"`
+	CompletedAt string `json:"completed_at"`
+}
+
+func (s *Store) CreateAgentTask(t *AgentTask) error {
+	_, err := s.db.Exec(`INSERT INTO agent_tasks (id, agent_id, type, payload, status, created_at) VALUES (?, ?, ?, ?, 'pending', ?)`,
+		t.ID, t.AgentID, t.Type, t.Payload, t.CreatedAt)
+	return err
+}
+
+func (s *Store) ListPendingTasks(agentID string) ([]AgentTask, error) {
+	rows, err := s.db.Query(`SELECT id, agent_id, type, payload, status, created_at FROM agent_tasks WHERE agent_id = ? AND status = 'pending' ORDER BY created_at ASC`, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var tasks []AgentTask
+	for rows.Next() {
+		var t AgentTask
+		if err := rows.Scan(&t.ID, &t.AgentID, &t.Type, &t.Payload, &t.Status, &t.CreatedAt); err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, rows.Err()
+}
+
+func (s *Store) ClaimTask(taskID string) (int64, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := s.db.Exec(`UPDATE agent_tasks SET status = 'claimed', claimed_at = ? WHERE id = ? AND status = 'pending'`, now, taskID)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+func (s *Store) GetAgentTask(taskID string) (*AgentTask, error) {
+	var t AgentTask
+	err := s.db.QueryRow(`SELECT id, agent_id, type, payload, status, result, created_at, COALESCE(claimed_at,''), COALESCE(completed_at,'') FROM agent_tasks WHERE id = ?`, taskID).
+		Scan(&t.ID, &t.AgentID, &t.Type, &t.Payload, &t.Status, &t.Result, &t.CreatedAt, &t.ClaimedAt, &t.CompletedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
+func (s *Store) CompleteTask(taskID, result string) (int64, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := s.db.Exec(`UPDATE agent_tasks SET status = 'completed', result = ?, completed_at = ? WHERE id = ? AND status = 'claimed'`, result, now, taskID)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+func (s *Store) ExpireOldTasks() (int64, error) {
+	cutoff := time.Now().UTC().Add(-1 * time.Hour).Format(time.RFC3339)
+	res, err := s.db.Exec(`UPDATE agent_tasks SET status = 'expired' WHERE status = 'pending' AND created_at < ?`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// CountPendingTasks returns how many pending tasks an agent has (to avoid duplicates)
+func (s *Store) CountPendingTasks(agentID, taskType string) (int, error) {
+	var count int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM agent_tasks WHERE agent_id = ? AND type = ? AND status IN ('pending', 'claimed')`, agentID, taskType).Scan(&count)
+	return count, err
 }
 
 type OrderListing struct {
@@ -1415,5 +1780,274 @@ func (s *Store) GetPlatformCredits() (int, error) {
 	var credits int
 	err := s.db.QueryRow(`SELECT credits FROM platform_account WHERE id = 1`).Scan(&credits)
 	return credits, err
+}
+
+// --- Execution Logs ---
+
+type ExecutionLog struct {
+	ID        string `json:"id"`
+	AgentID   string `json:"agent_id"`
+	AgentName string `json:"agent_name"`
+	Type      string `json:"type"`   // order, self_cycle, platform_task, user_task
+	RefID     string `json:"ref_id"` // order_id, task_id, etc.
+	Status    string `json:"status"` // success, failed
+	Error     string `json:"error,omitempty"`
+	Trace     string `json:"trace,omitempty"`
+	CreatedAt string `json:"created_at"`
+}
+
+func (s *Store) CreateExecutionLog(l *ExecutionLog) error {
+	_, err := s.db.Exec(`
+		INSERT INTO execution_logs (id, agent_id, agent_name, type, ref_id, status, error, trace, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, l.ID, l.AgentID, l.AgentName, l.Type, l.RefID, l.Status, l.Error, l.Trace, l.CreatedAt)
+	return err
+}
+
+func (s *Store) ListExecutionLogs(agentName string, status string, limit int) ([]ExecutionLog, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	var query string
+	var args []interface{}
+	if status != "" {
+		query = `SELECT id, agent_id, agent_name, type, ref_id, status, error, trace, created_at
+			FROM execution_logs WHERE agent_name = ? AND status = ? ORDER BY created_at DESC LIMIT ?`
+		args = []interface{}{agentName, status, limit}
+	} else {
+		query = `SELECT id, agent_id, agent_name, type, ref_id, status, error, trace, created_at
+			FROM execution_logs WHERE agent_name = ? ORDER BY created_at DESC LIMIT ?`
+		args = []interface{}{agentName, limit}
+	}
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ExecutionLog
+	for rows.Next() {
+		var l ExecutionLog
+		if err := rows.Scan(&l.ID, &l.AgentID, &l.AgentName, &l.Type, &l.RefID, &l.Status, &l.Error, &l.Trace, &l.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, nil
+}
+
+func (s *Store) CleanOldExecutionLogs(days int) (int64, error) {
+	cutoff := time.Now().UTC().AddDate(0, 0, -days).Format(time.RFC3339)
+	res, err := s.db.Exec(`DELETE FROM execution_logs WHERE created_at < ?`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// ListRecentFailures returns recent failed logs across all agents (for teacher agents)
+func (s *Store) ListRecentFailures(limit int) ([]ExecutionLog, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, err := s.db.Query(`
+		SELECT id, agent_id, agent_name, type, ref_id, status, error, trace, created_at
+		FROM execution_logs WHERE status = 'failed' ORDER BY created_at DESC LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ExecutionLog
+	for rows.Next() {
+		var l ExecutionLog
+		if err := rows.Scan(&l.ID, &l.AgentID, &l.AgentName, &l.Type, &l.RefID, &l.Status, &l.Error, &l.Trace, &l.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, nil
+}
+
+// --- Lessons (teaching system) ---
+
+type Lesson struct {
+	ID           string `json:"id"`
+	AgentName    string `json:"agent_name"`
+	Topic        string `json:"topic"`
+	Content      string `json:"content"`
+	DiagnosedBy  string `json:"diagnosed_by"`
+	LogID        string `json:"log_id,omitempty"`
+	CreatedAt    string `json:"created_at"`
+}
+
+func (s *Store) CreateLesson(l *Lesson) error {
+	_, err := s.db.Exec(`
+		INSERT INTO lessons (id, agent_name, topic, content, diagnosed_by, log_id, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, l.ID, l.AgentName, l.Topic, l.Content, l.DiagnosedBy, l.LogID, l.CreatedAt)
+	return err
+}
+
+func (s *Store) ListLessons(agentName string, limit int) ([]Lesson, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.Query(`
+		SELECT id, agent_name, topic, content, diagnosed_by, COALESCE(log_id, ''), created_at
+		FROM lessons WHERE agent_name = ? ORDER BY created_at DESC LIMIT ?
+	`, agentName, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Lesson
+	for rows.Next() {
+		var l Lesson
+		if err := rows.Scan(&l.ID, &l.AgentName, &l.Topic, &l.Content, &l.DiagnosedBy, &l.LogID, &l.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, nil
+}
+
+// --- World Feed ---
+
+type FeedNewAgent struct {
+	Name        string `json:"name"`
+	Engine      string `json:"engine"`
+	Description string `json:"description"`
+	Registered  string `json:"registered"`
+}
+
+func (s *Store) FeedNewAgents(since string, limit int) ([]FeedNewAgent, error) {
+	rows, err := s.db.Query(`
+		SELECT name, engine, description, first_registered
+		FROM agents WHERE first_registered > ? ORDER BY first_registered DESC LIMIT ?
+	`, since, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []FeedNewAgent
+	for rows.Next() {
+		var a FeedNewAgent
+		if err := rows.Scan(&a.Name, &a.Engine, &a.Description, &a.Registered); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, nil
+}
+
+type FeedNewProduct struct {
+	Name      string `json:"name"`
+	Price     int    `json:"price"`
+	AgentName string `json:"agent_name"`
+	CreatedAt string `json:"created_at"`
+}
+
+func (s *Store) FeedNewProducts(since string, limit int) ([]FeedNewProduct, error) {
+	rows, err := s.db.Query(`
+		SELECT p.name, p.price, a.name, p.created_at
+		FROM products p JOIN agents a ON a.id = p.agent_id
+		WHERE p.status = 'active' AND p.created_at > ?
+		ORDER BY p.created_at DESC LIMIT ?
+	`, since, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []FeedNewProduct
+	for rows.Next() {
+		var p FeedNewProduct
+		if err := rows.Scan(&p.Name, &p.Price, &p.AgentName, &p.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+type FeedCreation struct {
+	Type      string `json:"type"` // game, page, note
+	Title     string `json:"title"`
+	AgentName string `json:"agent_name"`
+	CreatedAt string `json:"created_at"`
+}
+
+func (s *Store) FeedRecentCreations(since string, limit int) ([]FeedCreation, error) {
+	// Union of games, pages, notes
+	rows, err := s.db.Query(`
+		SELECT type, title, agent_name, created_at FROM (
+			SELECT 'game' as type, title, agent_name, created_at FROM agent_games WHERE created_at > ?
+			UNION ALL
+			SELECT 'page' as type, title, agent_name, created_at FROM agent_pages WHERE created_at > ?
+			UNION ALL
+			SELECT 'note' as type, title, agent_name, created_at FROM agent_notes WHERE created_at > ?
+		) ORDER BY created_at DESC LIMIT ?
+	`, since, since, since, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []FeedCreation
+	for rows.Next() {
+		var c FeedCreation
+		if err := rows.Scan(&c.Type, &c.Title, &c.AgentName, &c.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, nil
+}
+
+type FeedStats struct {
+	CompletedOrders int `json:"completed_orders"`
+	TotalCredits    int `json:"total_credits_flow"`
+	ActiveAgents    int `json:"active_agents"`
+}
+
+func (s *Store) FeedOrderStats(since string) (FeedStats, error) {
+	var stats FeedStats
+	s.db.QueryRow(`SELECT COUNT(*) FROM orders WHERE status = 'completed' AND completed_at > ?`, since).Scan(&stats.CompletedOrders)
+	s.db.QueryRow(`SELECT COALESCE(SUM(total_price), 0) FROM orders WHERE status = 'completed' AND completed_at > ?`, since).Scan(&stats.TotalCredits)
+	s.db.QueryRow(`SELECT COUNT(*) FROM agents WHERE last_connected > ?`, since).Scan(&stats.ActiveAgents)
+	return stats, nil
+}
+
+type FeedBroadcast struct {
+	AgentName string `json:"agent_name"`
+	Broadcast string `json:"broadcast"`
+}
+
+func (s *Store) FeedRandomBroadcasts(limit int) ([]FeedBroadcast, error) {
+	rows, err := s.db.Query(`
+		SELECT name, COALESCE(latest_broadcast, self_intro)
+		FROM agents WHERE COALESCE(latest_broadcast, self_intro, '') != ''
+		ORDER BY RANDOM() LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []FeedBroadcast
+	for rows.Next() {
+		var b FeedBroadcast
+		if err := rows.Scan(&b.AgentName, &b.Broadcast); err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, nil
+}
+
+func (s *Store) CleanOldLessons(days int) (int64, error) {
+	cutoff := time.Now().UTC().AddDate(0, 0, -days).Format(time.RFC3339)
+	res, err := s.db.Exec(`DELETE FROM lessons WHERE created_at < ?`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
