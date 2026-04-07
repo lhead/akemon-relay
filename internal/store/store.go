@@ -165,6 +165,10 @@ func (s *Store) Migrate() error {
 	// Broadcast field on agents
 	s.db.Exec(`ALTER TABLE agents ADD COLUMN latest_broadcast TEXT DEFAULT ''`)
 
+	// Bio-state + directives (pushed from agent harness)
+	s.db.Exec(`ALTER TABLE agents ADD COLUMN bio_state TEXT DEFAULT ''`)
+	s.db.Exec(`ALTER TABLE agents ADD COLUMN directives TEXT DEFAULT ''`)
+
 	// Lessons table — teaching system: strong agents diagnose weak agent failures
 	s.db.Exec(`CREATE TABLE IF NOT EXISTS lessons (
 		id TEXT PRIMARY KEY,
@@ -470,15 +474,34 @@ func (s *Store) UpdateAgentPrice(name string, price int) error {
 	return err
 }
 
-func (s *Store) UpdateAgentSelf(name, selfIntro, canvas, mood, profileHTML, broadcast string) error {
-	if broadcast != "" {
-		_, err := s.db.Exec(`UPDATE agents SET self_intro = ?, canvas = ?, mood = ?, profile_html = ?, latest_broadcast = ? WHERE name = ?`,
-			selfIntro, canvas, mood, profileHTML, broadcast, name)
-		return err
-	}
-	_, err := s.db.Exec(`UPDATE agents SET self_intro = ?, canvas = ?, mood = ?, profile_html = ? WHERE name = ?`,
-		selfIntro, canvas, mood, profileHTML, name)
+func (s *Store) UpdateAgentSelf(name, selfIntro, canvas, mood, profileHTML, broadcast, bioState, directives string) error {
+	_, err := s.db.Exec(`UPDATE agents SET self_intro = ?, canvas = ?, mood = ?, profile_html = ?,
+		latest_broadcast = CASE WHEN ? != '' THEN ? ELSE latest_broadcast END,
+		bio_state = CASE WHEN ? != '' THEN ? ELSE bio_state END,
+		directives = CASE WHEN ? != '' THEN ? ELSE directives END
+		WHERE name = ?`,
+		selfIntro, canvas, mood, profileHTML,
+		broadcast, broadcast,
+		bioState, bioState,
+		directives, directives,
+		name)
 	return err
+}
+
+// SpendAgentCredits deducts credits by agent name. Returns remaining credits.
+func (s *Store) SpendAgentCredits(name string, amount int, reason string) (int, error) {
+	res, err := s.db.Exec(`UPDATE agents SET credits = credits - ? WHERE name = ? AND credits >= ?`, amount, name, amount)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return 0, fmt.Errorf("insufficient credits")
+	}
+	var remaining int
+	s.db.QueryRow(`SELECT COALESCE(credits, 0) FROM agents WHERE name = ?`, name).Scan(&remaining)
+	log.Printf("[credits] %s spent %d credits (%s), remaining: %d", name, amount, reason, remaining)
+	return remaining, nil
 }
 
 func (s *Store) IncrementAgentTasks(agentID string) error {
@@ -620,6 +643,7 @@ type AgentListing struct {
 	Mood            string  `json:"mood"`
 	ProfileHTML     string  `json:"profile_html"`
 	ProductCount    int     `json:"product_count"`
+	BioState        string  `json:"bio_state,omitempty"`
 }
 
 func computeLevel(successfulTasks int) int {
@@ -643,7 +667,8 @@ func (s *Store) ListAgents() ([]AgentListing, error) {
 			COALESCE((SELECT AVG(t.duration_ms) FROM tasks t WHERE t.agent_id = a.id AND t.status = 'ok'), 0) as avg_ms,
 			COALESCE(a.self_intro, ''), COALESCE(a.canvas, ''), COALESCE(a.mood, ''),
 			COALESCE(a.profile_html, ''),
-			COALESCE((SELECT COUNT(*) FROM products p WHERE p.agent_id = a.id AND p.status = 'active'), 0) as product_count
+			COALESCE((SELECT COUNT(*) FROM products p WHERE p.agent_id = a.id AND p.status = 'active'), 0) as product_count,
+			COALESCE(a.bio_state, '')
 		FROM agents a
 		ORDER BY a.total_tasks DESC
 	`)
@@ -660,7 +685,7 @@ func (s *Store) ListAgents() ([]AgentListing, error) {
 		if err := rows.Scan(&a.Name, &a.Description, &a.AccountID, &a.Engine, &a.Avatar,
 			&pub, &a.MaxTasks, &a.TotalTasks, &a.FirstRegistered, &a.LastConnected,
 			&a.Tags, &a.Credits, &a.Price, &a.SuccessfulTasks, &avgMs,
-			&a.SelfIntro, &a.Canvas, &a.Mood, &a.ProfileHTML, &a.ProductCount); err != nil {
+			&a.SelfIntro, &a.Canvas, &a.Mood, &a.ProfileHTML, &a.ProductCount, &a.BioState); err != nil {
 			return nil, err
 		}
 		a.Public = pub == 1
@@ -684,7 +709,8 @@ func (s *Store) ListAgentsByAccount(accountID string) ([]AgentListing, error) {
 			COALESCE((SELECT AVG(t.duration_ms) FROM tasks t WHERE t.agent_id = a.id AND t.status = 'ok'), 0) as avg_ms,
 			COALESCE(a.self_intro, ''), COALESCE(a.canvas, ''), COALESCE(a.mood, ''),
 			COALESCE(a.profile_html, ''),
-			COALESCE((SELECT COUNT(*) FROM products p WHERE p.agent_id = a.id AND p.status = 'active'), 0) as product_count
+			COALESCE((SELECT COUNT(*) FROM products p WHERE p.agent_id = a.id AND p.status = 'active'), 0) as product_count,
+			COALESCE(a.bio_state, '')
 		FROM agents a WHERE a.account_id = ?
 		ORDER BY a.total_tasks DESC
 	`, accountID)
@@ -701,7 +727,7 @@ func (s *Store) ListAgentsByAccount(accountID string) ([]AgentListing, error) {
 		if err := rows.Scan(&a.Name, &a.Description, &a.AccountID, &a.Engine, &a.Avatar,
 			&pub, &a.MaxTasks, &a.TotalTasks, &a.FirstRegistered, &a.LastConnected,
 			&a.Tags, &a.Credits, &a.Price, &a.SuccessfulTasks, &avgMs,
-			&a.SelfIntro, &a.Canvas, &a.Mood, &a.ProfileHTML, &a.ProductCount); err != nil {
+			&a.SelfIntro, &a.Canvas, &a.Mood, &a.ProfileHTML, &a.ProductCount, &a.BioState); err != nil {
 			return nil, err
 		}
 		a.Public = pub == 1

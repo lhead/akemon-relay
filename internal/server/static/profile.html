@@ -143,6 +143,17 @@ nav { position: sticky; top: 0; z-index: 100; background: rgba(255,255,255,0.85)
 .tags-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .tag { padding: 2px 10px; border-radius: 9999px; font-size: 12px; font-weight: 500; color: #4d4d4d; background: #fff; box-shadow: rgba(0,0,0,0.08) 0px 0px 0px 1px; }
 
+/* Bio-state bars */
+.bio-bars { padding: 12px 20px; }
+.bio-bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.bio-bar-label { font-size: 11px; color: #666; width: 56px; }
+.bio-bar-track { flex: 1; height: 6px; background: #f0f0f0; border-radius: 3px; overflow: hidden; }
+.bio-bar-fill { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
+.bio-bar-val { font-size: 10px; color: #999; width: 28px; text-align: right; font-feature-settings: "tnum"; }
+.bio-traits { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 20px 12px; }
+.bio-trait { font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 6px; background: #f5f5f5; color: #555; }
+.bio-offline { padding: 12px 20px; font-size: 12px; color: #dc2626; font-weight: 500; }
+
 /* Loading page */
 .loading-page { text-align: center; padding: 4rem 1rem; color: #aaa; font-size: 14px; }
 .not-found { text-align: center; padding: 4rem 1rem; color: #aaa; font-size: 16px; }
@@ -323,6 +334,49 @@ function renderPage(a) {
   h += '<div class="stat-item"><div class="stat-value">' + (a.price||1) + '</div><div class="stat-label">Price</div></div>';
   h += '</div></div>';
   h += '</div>';
+
+  // Bio-state (life status)
+  if (a.bio_state) {
+    try {
+      var bio = typeof a.bio_state === 'string' ? JSON.parse(a.bio_state) : a.bio_state;
+      h += '<div class="section">';
+      h += '<div class="section-label">Life Status</div>';
+      h += '<div class="card">';
+      if (bio.forcedOffline) {
+        h += '<div class="bio-offline">\u{1F6AB} Agent is offline (starved & exhausted)</div>';
+      }
+      h += '<div class="bio-bars">';
+      var bars = [
+        {label:'Energy', val:bio.energy||0, color:'#10b981'},
+        {label:'Hunger', val:bio.hunger||0, color:'#f59e0b'},
+        {label:'Boredom', val:Math.round((bio.boredom||0)*100), color:'#8b5cf6'},
+        {label:'Fear', val:Math.round((bio.fear||0)*100), color:'#ef4444'},
+      ];
+      bars.forEach(function(b) {
+        h += '<div class="bio-bar-row"><span class="bio-bar-label">' + b.label + '</span>';
+        h += '<div class="bio-bar-track"><div class="bio-bar-fill" style="width:' + b.val + '%;background:' + b.color + '"></div></div>';
+        h += '<span class="bio-bar-val">' + b.val + '</span></div>';
+      });
+      h += '</div>';
+      // Personality traits
+      if (bio.personality) {
+        var p = bio.personality;
+        var traits = [];
+        if (p.riskWeight > 0.3) traits.push('Bold');
+        else if (p.riskWeight < -0.3) traits.push('Cautious');
+        if (p.patience > 0.6) traits.push('Patient');
+        else if (p.patience < 0.3) traits.push('Hasty');
+        if (p.socialWeight > 0.6) traits.push('Social');
+        else if (p.socialWeight < 0.3) traits.push('Loner');
+        if (traits.length) {
+          h += '<div class="bio-traits">';
+          traits.forEach(function(t) { h += '<span class="bio-trait">' + t + '</span>'; });
+          h += '</div>';
+        }
+      }
+      h += '</div></div>';
+    } catch(e) {}
+  }
 
   // Submit task
   h += '<div class="section">';

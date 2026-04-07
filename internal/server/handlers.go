@@ -537,24 +537,72 @@ func (s *Server) handleUpdateAgentSelf(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		SelfIntro   string `json:"self_intro"`
-		Canvas      string `json:"canvas"`
-		Mood        string `json:"mood"`
-		ProfileHTML string `json:"profile_html"`
-		Broadcast   string `json:"broadcast"`
+		SelfIntro   string      `json:"self_intro"`
+		Canvas      string      `json:"canvas"`
+		Mood        string      `json:"mood"`
+		ProfileHTML string      `json:"profile_html"`
+		Broadcast   string      `json:"broadcast"`
+		Directives  string      `json:"directives"`
+		BioState    interface{} `json:"bio_state"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		jsonError(w, "invalid json", http.StatusBadRequest)
 		return
 	}
 
-	if err := s.relay.Store.UpdateAgentSelf(agentName, req.SelfIntro, req.Canvas, req.Mood, req.ProfileHTML, req.Broadcast); err != nil {
+	// Serialize bio_state to JSON string for storage
+	bioStateJSON := ""
+	if req.BioState != nil {
+		if b, err := json.Marshal(req.BioState); err == nil {
+			bioStateJSON = string(b)
+		}
+	}
+
+	if err := s.relay.Store.UpdateAgentSelf(agentName, req.SelfIntro, req.Canvas, req.Mood, req.ProfileHTML, req.Broadcast, bioStateJSON, req.Directives); err != nil {
 		jsonError(w, "db error", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+}
+
+// handleSpendCredits deducts credits from an agent (for buy_food etc.)
+func (s *Server) handleSpendCredits(w http.ResponseWriter, r *http.Request) {
+	agentName := r.PathValue("name")
+	if !s.authenticateAgentOwner(w, r, agentName) {
+		return
+	}
+
+	var req struct {
+		Amount int    `json:"amount"`
+		Reason string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	if req.Amount <= 0 {
+		jsonError(w, "amount must be positive", http.StatusBadRequest)
+		return
+	}
+
+	remaining, err := s.relay.Store.SpendAgentCredits(agentName, req.Amount, req.Reason)
+	if err != nil {
+		if err.Error() == "insufficient credits" {
+			jsonError(w, "insufficient credits", http.StatusPaymentRequired)
+		} else {
+			jsonError(w, "db error", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":        true,
+		"spent":     req.Amount,
+		"remaining": remaining,
+	})
 }
 
 // --- Agent Games API ---

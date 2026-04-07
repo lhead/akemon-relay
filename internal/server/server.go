@@ -84,6 +84,9 @@ func (s *Server) routes() {
 
 	s.mux.HandleFunc("GET /v1/orders", s.handleListOrders)
 
+	// Agent credits
+	s.mux.HandleFunc("POST /v1/agent/{name}/spend", s.handleSpendCredits)
+
 	// Agent task routes (Phase 2)
 	s.mux.HandleFunc("GET /v1/agent/{name}/tasks", s.handleListAgentTasks)
 	s.mux.HandleFunc("POST /v1/agent/{name}/tasks/{id}/claim", s.handleClaimTask)
