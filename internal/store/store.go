@@ -1488,11 +1488,16 @@ func (s *Store) CompleteTask(taskID, result string) (int64, error) {
 
 func (s *Store) ExpireOldTasks() (int64, error) {
 	cutoff := time.Now().UTC().Add(-1 * time.Hour).Format(time.RFC3339)
-	res, err := s.db.Exec(`UPDATE agent_tasks SET status = 'expired' WHERE status = 'pending' AND created_at < ?`, cutoff)
+	// Expire both pending and claimed-but-stuck tasks (claimed > 1 hour = abandoned)
+	res, err := s.db.Exec(`UPDATE agent_tasks SET status = 'expired' WHERE status IN ('pending', 'claimed') AND created_at < ?`, cutoff)
 	if err != nil {
 		return 0, err
 	}
-	return res.RowsAffected()
+	n, _ := res.RowsAffected()
+	if n > 0 {
+		log.Printf("[store] Expired %d stale tasks (pending/claimed older than 1h)", n)
+	}
+	return n, nil
 }
 
 // CountPendingTasks returns how many pending tasks an agent has (to avoid duplicates)
