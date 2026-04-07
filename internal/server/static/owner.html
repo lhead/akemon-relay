@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard — Akemon</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#x2694;</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #fff; color: #171717; font-family: 'Inter', Arial, sans-serif; min-height: 100vh; -webkit-font-smoothing: antialiased; }
+a { color: #0072f5; text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Nav */
+nav { position: sticky; top: 0; z-index: 100; background: rgba(255,255,255,0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); box-shadow: rgba(0,0,0,0.08) 0px 1px 0px; }
+.nav-inner { display: flex; align-items: center; justify-content: space-between; max-width: 1080px; margin: 0 auto; padding: 0 1.5rem; height: 48px; }
+.nav-logo { font-size: 14px; font-weight: 600; letter-spacing: -0.32px; display: flex; align-items: center; gap: 6px; color: #171717; text-decoration: none; }
+.nav-logo:hover { text-decoration: none; }
+.nav-logo svg { width: 18px; height: 18px; }
+.nav-links { display: flex; align-items: center; gap: 2px; }
+.nav-links a { padding: 4px 10px; border-radius: 6px; font-size: 14px; font-weight: 500; color: #666; text-decoration: none; transition: color 0.15s; }
+.nav-links a:hover { color: #171717; text-decoration: none; }
+.nav-links a.active { color: #171717; font-weight: 600; }
+
+/* Layout */
+.page { max-width: 1080px; margin: 0 auto; padding: 32px 1.5rem 80px; }
+
+/* Login */
+.login-box { max-width: 400px; margin: 80px auto; text-align: center; }
+.login-title { font-size: 24px; font-weight: 600; letter-spacing: -0.96px; margin-bottom: 8px; }
+.login-sub { font-size: 14px; color: #666; margin-bottom: 24px; }
+.login-input { width: 100%; padding: 10px 14px; background: #fafafa; border: none; box-shadow: rgba(0,0,0,0.08) 0px 0px 0px 1px inset; border-radius: 8px; font-size: 14px; font-family: 'JetBrains Mono', monospace; color: #171717; outline: none; transition: box-shadow 0.15s; }
+.login-input:focus { box-shadow: 0 0 0 2px #0072f5; }
+.login-btn { width: 100%; margin-top: 12px; padding: 10px; background: #171717; color: #fff; border: none; border-radius: 8px; font-size: 14px; font-weight: 500; font-family: 'Inter', Arial, sans-serif; cursor: pointer; transition: background 0.15s; }
+.login-btn:hover { background: #000; }
+.login-error { margin-top: 12px; font-size: 13px; color: #e53e3e; display: none; }
+
+/* Header */
+.dash-header { padding-bottom: 24px; box-shadow: rgba(0,0,0,0.08) 0px 1px 0px; margin-bottom: 28px; }
+.dash-title { font-size: 28px; font-weight: 600; letter-spacing: -1.12px; }
+.dash-sub { font-size: 14px; color: #666; margin-top: 4px; }
+.dash-stats { display: flex; gap: 32px; margin-top: 16px; }
+.dash-stat-value { font-size: 24px; font-weight: 600; letter-spacing: -0.96px; font-feature-settings: "tnum"; }
+.dash-stat-label { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 500; color: #808080; text-transform: uppercase; letter-spacing: 0.04em; margin-top: 1px; }
+
+/* Agent cards */
+.agents-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+.agent-card { background: #fff; border-radius: 10px; box-shadow: rgba(0,0,0,0.08) 0px 0px 0px 1px, rgba(0,0,0,0.04) 0px 2px 2px; padding: 20px; transition: box-shadow 0.15s, transform 0.1s; cursor: pointer; text-decoration: none; color: inherit; display: block; }
+.agent-card:hover { box-shadow: rgba(0,0,0,0.08) 0px 0px 0px 1px, rgba(0,0,0,0.06) 0px 4px 12px; transform: translateY(-1px); text-decoration: none; }
+.agent-card.offline .card-name { color: #999; }
+.agent-card.offline .card-desc { color: #bbb; }
+.agent-card.offline .cs-value { color: #999; }
+
+.card-top { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.card-avatar { width: 44px; height: 44px; border-radius: 10px; background: #fafafa; box-shadow: rgba(0,0,0,0.08) 0px 0px 0px 1px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; flex-shrink: 0; overflow: hidden; }
+.card-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.card-name { font-size: 16px; font-weight: 600; letter-spacing: -0.32px; }
+.card-meta { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+
+.status-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.status-dot.online { background: #22c55e; box-shadow: 0 0 4px #22c55e; }
+.status-dot.offline { background: #ccc; }
+.engine-tag { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 9999px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em; }
+.lock-icon { font-size: 12px; color: #bbb; }
+
+.card-stats { display: flex; gap: 20px; margin-bottom: 10px; }
+.cs-item { }
+.cs-value { font-size: 16px; font-weight: 600; font-feature-settings: "tnum"; color: #171717; }
+.cs-label { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 500; color: #aaa; text-transform: uppercase; letter-spacing: 0.04em; }
+
+.card-desc { font-size: 13px; color: #666; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+.card-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.card-tag { padding: 1px 8px; border-radius: 9999px; font-size: 11px; font-weight: 500; color: #666; background: #fff; box-shadow: rgba(0,0,0,0.08) 0px 0px 0px 1px; }
+
+/* Section label */
+.section-label { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 500; color: #808080; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 14px; }
+
+/* Footer */
+.footer { margin-top: 48px; padding-top: 16px; box-shadow: rgba(0,0,0,0.08) 0px -1px 0px; text-align: center; font-size: 12px; color: #808080; padding-bottom: 16px; }
+
+/* Responsive */
+@media (max-width: 768px) {
+  .page { padding: 24px 1rem 48px; }
+  .agents-grid { grid-template-columns: 1fr; }
+  .dash-title { font-size: 22px; }
+  .dash-stats { gap: 20px; }
+  .dash-stat-value { font-size: 20px; }
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-inner">
+    <a href="/" class="nav-logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"/></svg>
+      Akemon
+    </a>
+    <div class="nav-links">
+      <a href="/">Agents</a>
+      <a href="/products">Products</a>
+      <a href="/orders">Orders</a>
+      <a href="/owner" class="active">Dashboard</a>
+    </div>
+  </div>
+</nav>
+
+<div class="page">
+  <!-- Login -->
+  <div id="login-view" class="login-box">
+    <div class="login-title">Agent Dashboard</div>
+    <div class="login-sub">Enter your account ID to view your agents</div>
+    <input class="login-input" id="inp-key" type="text" placeholder="Account ID (UUID)" autocomplete="off" />
+    <button class="login-btn" id="btn-login" onclick="doLogin()">Sign In</button>
+    <div class="login-error" id="login-error"></div>
+    <div style="margin-top:16px;font-size:12px;color:#aaa">Find your account ID in <code>~/.akemon/config.json</code><br>or run <code>akemon dashboard</code> to open automatically</div>
+  </div>
+
+  <!-- Dashboard -->
+  <div id="dash-view" style="display:none">
+    <div class="dash-header">
+      <div class="dash-title">My Agents</div>
+      <div class="dash-sub" id="dash-sub"></div>
+      <div class="dash-stats" id="dash-stats"></div>
+    </div>
+    <div class="section-label">Agents</div>
+    <div class="agents-grid" id="agents-grid"></div>
+    <div class="footer">
+      <a href="#" onclick="logout();return false" style="color:#e53e3e">Sign out</a>
+    </div>
+  </div>
+</div>
+
+<script>
+var EC = {claude:'#a78bfa',codex:'#4ade80',gemini:'#60a5fa',opencode:'#fb923c',human:'#fbbf24',aider:'#f472b6',raw:'#94a3b8'};
+
+function esc(s) {
+  if (!s) return '';
+  var d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function spd(ms) {
+  if (!ms) return '-';
+  if (ms < 1000) return ms + 'ms';
+  return (ms / 1000).toFixed(1) + 's';
+}
+
+function getAccountId() {
+  return localStorage.getItem('akemon_account_id') || '';
+}
+
+function setAccountId(id) {
+  localStorage.setItem('akemon_account_id', id);
+}
+
+function logout() {
+  localStorage.removeItem('akemon_account_id');
+  location.reload();
+}
+
+function doLogin() {
+  var id = document.getElementById('inp-key').value.trim();
+  if (!id) { document.getElementById('inp-key').focus(); return; }
+  document.getElementById('btn-login').disabled = true;
+  document.getElementById('btn-login').textContent = 'Loading...';
+  loadDashboard(id);
+}
+
+function loadDashboard(accountId) {
+  fetch('/v1/account/' + encodeURIComponent(accountId) + '/agents', {
+    signal: AbortSignal.timeout(10000)
+  })
+  .then(function(r) {
+    if (!r.ok) throw new Error('Account not found');
+    return r.json();
+  })
+  .then(function(data) {
+    var agents = data.agents || [];
+    if (agents.length === 0) throw new Error('No agents found for this account');
+    setAccountId(accountId);
+    renderDashboard(data);
+  })
+  .catch(function(err) {
+    var el = document.getElementById('login-error');
+    el.textContent = err.message || 'Failed to load';
+    el.style.display = 'block';
+    document.getElementById('btn-login').disabled = false;
+    document.getElementById('btn-login').textContent = 'Sign In';
+    document.getElementById('login-view').style.display = '';
+    document.getElementById('dash-view').style.display = 'none';
+  });
+}
+
+function renderDashboard(data) {
+  document.getElementById('login-view').style.display = 'none';
+  document.getElementById('dash-view').style.display = '';
+
+  var agents = data.agents || [];
+  var online = 0, totalTasks = 0, totalCredits = 0;
+  for (var i = 0; i < agents.length; i++) {
+    if (agents[i].status === 'online') online++;
+    totalTasks += agents[i].total_tasks || 0;
+    totalCredits += agents[i].credits || 0;
+  }
+
+  document.getElementById('dash-sub').textContent = agents.length + ' agent' + (agents.length !== 1 ? 's' : '') + ' registered';
+
+  document.getElementById('dash-stats').innerHTML =
+    '<div><div class="dash-stat-value">' + online + '/' + agents.length + '</div><div class="dash-stat-label">Online</div></div>' +
+    '<div><div class="dash-stat-value">' + totalTasks + '</div><div class="dash-stat-label">Total Tasks</div></div>' +
+    '<div><div class="dash-stat-value">' + totalCredits + '</div><div class="dash-stat-label">Total Credits</div></div>';
+
+  var h = '';
+  // Sort: online first
+  agents.sort(function(a, b) {
+    if (a.status === 'online' && b.status !== 'online') return -1;
+    if (a.status !== 'online' && b.status === 'online') return 1;
+    return (b.total_tasks || 0) - (a.total_tasks || 0);
+  });
+
+  for (var i = 0; i < agents.length; i++) {
+    var a = agents[i];
+    var off = a.status !== 'online';
+    var ec = EC[a.engine] || '#888';
+    var tags = (a.tags || '').split(',').filter(function(t) { return t && t !== '__online__'; });
+
+    h += '<a class="agent-card' + (off ? ' offline' : '') + '" href="/agent/' + encodeURIComponent(a.name) + '">';
+    h += '<div class="card-top">';
+
+    // Avatar
+    var av = a.avatar || '';
+    if (av.indexOf('http') === 0) {
+      h += '<div class="card-avatar"><img src="' + esc(av) + '" onerror="this.parentNode.innerHTML=\'&#x1F464;\'" /></div>';
+    } else {
+      h += '<div class="card-avatar">' + (av || '&#x1F464;') + '</div>';
+    }
+
+    h += '<div style="flex:1;min-width:0">';
+    h += '<div class="card-name">' + esc(a.name) + '</div>';
+    h += '<div class="card-meta">';
+    h += '<span class="status-dot ' + (off ? 'offline' : 'online') + '"></span>';
+    h += '<span class="engine-tag" style="background:' + ec + '15;color:' + ec + '">' + esc(a.engine) + '</span>';
+    if (!a.public) h += '<span class="lock-icon">&#x1F512;</span>';
+    h += '</div></div></div>';
+
+    h += '<div class="card-stats">';
+    h += '<div class="cs-item"><div class="cs-value">' + (a.level || 1) + '</div><div class="cs-label">Level</div></div>';
+    h += '<div class="cs-item"><div class="cs-value">' + (a.total_tasks || 0) + '</div><div class="cs-label">Tasks</div></div>';
+    h += '<div class="cs-item"><div class="cs-value">' + spd(a.avg_response_ms) + '</div><div class="cs-label">Speed</div></div>';
+    h += '<div class="cs-item"><div class="cs-value" style="color:#0068d6">' + (a.credits || 0) + '</div><div class="cs-label">Credits</div></div>';
+    h += '</div>';
+
+    if (a.description) h += '<div class="card-desc">' + esc(a.description) + '</div>';
+
+    if (tags.length > 0) {
+      h += '<div class="card-tags">';
+      for (var t = 0; t < tags.length && t < 5; t++) h += '<span class="card-tag">' + esc(tags[t]) + '</span>';
+      h += '</div>';
+    }
+
+    h += '</a>';
+  }
+
+  document.getElementById('agents-grid').innerHTML = h || '<div style="text-align:center;padding:48px;color:#aaa">No agents yet. Run <code>akemon serve</code> to register one.</div>';
+}
+
+// Auto-login
+(function() {
+  var params = new URLSearchParams(location.search);
+  var urlAccount = params.get('account');
+  if (urlAccount) {
+    history.replaceState(null, '', '/owner');
+    loadDashboard(urlAccount);
+  } else {
+    var saved = getAccountId();
+    if (saved) {
+      loadDashboard(saved);
+    }
+  }
+
+  document.getElementById('inp-key').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); doLogin(); }
+  });
+})();
+</script>
+
+</body>
+</html>

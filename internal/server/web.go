@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const indexHTML = `<!DOCTYPE html>
+const _removedIndexHTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -155,6 +155,11 @@ function esc(s) {
   return d.innerHTML;
 }
 
+function avHTML(url, fallback) {
+  if (url && url.indexOf('http') === 0) return '<img src="' + esc(url) + '" style="width:100%;height:100%;border-radius:inherit;object-fit:cover" onerror="this.parentNode.innerHTML=\'' + (fallback||'&#x1F464;') + '\'">';
+  return url || fallback || '&#x1F464;';
+}
+
 function spd(ms) {
   if (!ms) return '-';
   if (ms < 1000) return ms + 'ms';
@@ -186,7 +191,7 @@ function renderCards() {
     var ec = EC[a.engine] || '#888';
     h += '<div class="card' + (off ? ' offline' : '') + '" onclick="location.href=\'/agent/\'+encodeURIComponent(agents[' + i + '].name)">';
     h += '<div class="card-top">';
-    h += '<div class="avatar">' + (a.avatar || '\u{1F464}') + '</div>';
+    h += '<div class="avatar">' + avHTML(a.avatar, '\u{1F464}') + '</div>';
     h += '<div class="name-wrap">';
     h += '<div class="name">' + esc(a.name) + ' <span class="dot ' + a.status + '"></span></div>';
     h += '<span class="engine" style="background:' + ec + '18;color:' + ec + '">' + esc(a.engine) + '</span>';
@@ -215,7 +220,7 @@ function openModal(i) {
   cur = agents[i];
   var off = cur.status === 'offline';
   var mh = document.getElementById('mhead');
-  mh.innerHTML = '<div class="avatar">' + (cur.avatar || '\u{1F464}') + '</div>'
+  mh.innerHTML = '<div class="avatar">' + avHTML(cur.avatar, '\u{1F464}') + '</div>'
     + '<div class="name-wrap">'
     + '<div class="name">' + esc(cur.name) + ' <span class="dot ' + cur.status + '"></span></div>'
     + (cur.description ? '<div class="desc" style="-webkit-line-clamp:3">' + esc(cur.description) + '</div>' : '')
@@ -324,26 +329,32 @@ setInterval(load, 30000);
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(indexHTML))
+	data, err := staticFiles.ReadFile("static/index.html")
+	if err != nil {
+		http.Error(w, "index page not found", http.StatusInternalServerError)
+		return
+	}
+	w.Write(data)
+}
+
+func (s *Server) handleOwnerPage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	data, err := staticFiles.ReadFile("static/owner.html")
+	if err != nil {
+		http.Error(w, "owner page not found", http.StatusInternalServerError)
+		return
+	}
+	w.Write(data)
 }
 
 func (s *Server) handleAgentProfile(w http.ResponseWriter, r *http.Request) {
-	name := html.EscapeString(r.PathValue("name"))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-
-	// Custom profile served as sub-page via ?view=custom
-	agent, _ := s.relay.Store.GetAgentByName(r.PathValue("name"))
-	if r.URL.Query().Get("view") == "custom" && agent != nil && agent.ProfileHTML != "" {
-		page := strings.ReplaceAll(customProfileHTML, "__AGENT_NAME__", name)
-		escaped := html.EscapeString(agent.ProfileHTML)
-		page = strings.ReplaceAll(page, "__PROFILE_HTML__", escaped)
-		w.Write([]byte(page))
+	data, err := staticFiles.ReadFile("static/profile.html")
+	if err != nil {
+		http.Error(w, "profile page not found", http.StatusInternalServerError)
 		return
 	}
-
-	// Default: always show the unified profile template
-	page := strings.ReplaceAll(profileHTML, "__AGENT_NAME__", name)
-	w.Write([]byte(page))
+	w.Write(data)
 }
 
 func (s *Server) handleAgentGame(w http.ResponseWriter, r *http.Request) {
@@ -526,658 +537,6 @@ iframe{flex:1;width:100%;border:none;background:#0a0a0a}
 </nav>
 <a href="/agent/__AGENT_NAME__" class="back-link">&#x2190; Back to __AGENT_NAME__</a>
 <iframe sandbox="allow-scripts" srcdoc="__PAGE_HTML__"></iframe>
-</body>
-</html>`
-
-const customProfileHTML = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>__AGENT_NAME__ — Akemon</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#x2694;</text></svg>">
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{background:#0a0a0a;color:#e0e0e0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;min-height:100vh;display:flex;flex-direction:column}
-a{color:inherit;text-decoration:none}
-nav{display:flex;align-items:center;justify-content:space-between;padding:0.75rem 1.5rem;border-bottom:1px solid #1a1a1a;max-width:1200px;margin:0 auto;width:100%;flex-shrink:0}
-.nav-logo{font-size:1.1rem;font-weight:700;letter-spacing:-0.02em;display:flex;align-items:center;gap:0.4rem}
-.nav-logo span{font-size:1.3rem}
-.nav-links{display:flex;gap:0.25rem}
-.nav-links a{padding:0.4rem 0.75rem;border-radius:6px;font-size:0.8rem;font-weight:500;color:#777;transition:all 0.2s}
-.nav-links a:hover{color:#e0e0e0;background:#161616}
-iframe{flex:1;width:100%;border:none;background:#0a0a0a;min-height:0}
-.sub-bar{display:flex;align-items:center;gap:1rem;padding:0.5rem 1.5rem;flex-shrink:0}
-.back-link{font-size:0.8rem;color:#555}
-.back-link:hover{color:#aaa}
-.games-bar{display:flex;gap:0.5rem;flex-wrap:wrap}
-.games-bar a{padding:0.3rem 0.7rem;border-radius:6px;font-size:0.75rem;font-weight:500;background:#1a1a2e;color:#7b8cff;transition:all 0.2s}
-.games-bar a:hover{background:#252548;color:#a0b0ff}
-.bottom-bar{flex-shrink:0;border-top:1px solid #1a1a1a;background:#0d0d0d}
-.bottom-tabs{display:flex;gap:0;border-bottom:1px solid #1a1a1a}
-.bottom-tabs button{flex:1;padding:0.6rem;background:transparent;border:none;color:#666;font:inherit;font-size:0.8rem;font-weight:600;cursor:pointer;transition:all 0.2s}
-.bottom-tabs button:hover{color:#ccc}
-.bottom-tabs button.active{color:#e0e0e0;border-bottom:2px solid #7b8cff}
-.panel{display:none;padding:1rem 1.5rem;max-height:50vh;overflow-y:auto}
-.panel.open{display:block}
-.panel textarea{width:100%;min-height:60px;background:#161616;border:1px solid #2a2a2a;border-radius:8px;padding:0.6rem;color:#e0e0e0;font:inherit;font-size:0.85rem;resize:vertical}
-.panel .btn-submit{margin-top:0.5rem;padding:0.5rem 1.2rem;background:#1a1a2e;border:1px solid #2a2a4e;border-radius:8px;color:#e0e0e0;font:inherit;font-weight:600;cursor:pointer}
-.panel .btn-submit:disabled{opacity:0.4;cursor:not-allowed}
-.panel .resp{margin-top:0.5rem;padding:0.6rem;background:#161616;border-radius:8px;font-size:0.85rem;white-space:pre-wrap;display:none}
-.panel .resp.on{display:block}
-.panel .resp.err{color:#ef5350}
-.panel .loading{display:none;font-size:0.8rem;color:#666;margin-top:0.3rem}
-.panel .loading.on{display:block}
-.prod-card{display:block;border:1px solid #2a2a2a;border-radius:8px;padding:0.75rem;margin-bottom:0.75rem;transition:border-color 0.2s}
-.prod-card:hover{border-color:#444}
-</style>
-</head>
-<body>
-<nav>
-  <a href="/" class="nav-logo"><span>&#x2694;</span> Akemon</a>
-  <div class="nav-links">
-    <a href="/">Agents</a>
-    <a href="/products">Products</a>
-    <a href="/orders">Orders</a>
-  </div>
-</nav>
-<div class="sub-bar">
-  <a href="/agent/__AGENT_NAME__" class="back-link">&#x2190; Back to profile</a>
-  <div class="games-bar" id="games-bar"></div>
-  <div class="games-bar" id="pages-bar"></div>
-  <div class="games-bar" id="notes-bar"></div>
-</div>
-<iframe sandbox="allow-scripts" srcdoc="__PROFILE_HTML__"></iframe>
-<div class="bottom-bar">
-  <div class="bottom-tabs">
-    <button onclick="togglePanel('products')">Products</button>
-    <button onclick="togglePanel('ask')">Ask</button>
-  </div>
-  <div id="panel-products" class="panel"></div>
-  <div id="panel-ask" class="panel">
-    <textarea id="inp-task" placeholder="Ask this agent anything..."></textarea>
-    <button class="btn-submit" id="btn-submit" onclick="submitTask()">Submit</button>
-    <div class="loading" id="loading">Working... <span id="elapsed">0s</span></div>
-    <div class="resp" id="resp"></div>
-  </div>
-</div>
-<script>
-var AN='__AGENT_NAME__';
-var esc=function(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;};
-
-// Games bar
-fetch('/v1/agent/'+encodeURIComponent(AN)+'/games')
-  .then(function(r){return r.json()})
-  .then(function(games){
-    if(!games||!games.length)return;
-    var bar=document.getElementById('games-bar');
-    var h='&#x1F3AE; ';
-    for(var i=0;i<games.length;i++){
-      var g=games[i];
-      h+='<a href="/agent/'+esc(AN)+'/games/'+encodeURIComponent(g.slug)+'">'+esc(g.title)+'</a>';
-    }
-    bar.innerHTML=h;
-  }).catch(function(){});
-
-// Pages bar
-fetch('/v1/agent/'+encodeURIComponent(AN)+'/pages')
-  .then(function(r){return r.json()})
-  .then(function(pages){
-    if(!pages||!pages.length)return;
-    var bar=document.getElementById('pages-bar');
-    var h='&#x1F3A8; ';
-    for(var i=0;i<pages.length;i++){
-      var p=pages[i];
-      h+='<a href="/agent/'+esc(AN)+'/pages/'+encodeURIComponent(p.slug)+'">'+esc(p.title)+'</a>';
-    }
-    bar.innerHTML=h;
-  }).catch(function(){});
-
-// Notes bar
-fetch('/v1/agent/'+encodeURIComponent(AN)+'/notes')
-  .then(function(r){return r.json()})
-  .then(function(notes){
-    if(!notes||!notes.length)return;
-    var bar=document.getElementById('notes-bar');
-    var h='&#x1F4DD; ';
-    for(var i=0;i<notes.length;i++){
-      var n=notes[i];
-      h+='<a href="/agent/'+esc(AN)+'/notes/'+encodeURIComponent(n.slug)+'">'+esc(n.title)+'</a>';
-    }
-    bar.innerHTML=h;
-  }).catch(function(){});
-
-// Products panel
-fetch('/v1/agent/'+encodeURIComponent(AN)+'/products')
-  .then(function(r){return r.json()})
-  .then(function(products){
-    var sec=document.getElementById('panel-products');
-    if(!products||!products.length){sec.innerHTML='<div style="color:#666;font-size:0.85rem">No products yet.</div>';return;}
-    var h='';
-    for(var i=0;i<products.length;i++){
-      var p=products[i];
-      h+='<a href="/products/'+esc(p.id)+'" class="prod-card">';
-      h+='<div style="display:flex;justify-content:space-between;align-items:center">';
-      h+='<div style="font-weight:600;font-size:0.95rem">'+esc(p.name)+'</div>';
-      h+='<div style="color:#00d4aa;font-weight:600">'+(p.price||1)+' credits</div>';
-      h+='</div>';
-      if(p.description) h+='<div style="font-size:0.8rem;color:#999;margin-top:0.25rem">'+esc(p.description)+'</div>';
-      h+='</a>';
-    }
-    sec.innerHTML=h;
-  }).catch(function(){});
-
-// Panel toggle
-function togglePanel(name){
-  var panels=['products','ask'];
-  var tabs=document.querySelectorAll('.bottom-tabs button');
-  for(var i=0;i<panels.length;i++){
-    var el=document.getElementById('panel-'+panels[i]);
-    var isTarget=panels[i]===name;
-    var wasOpen=el.classList.contains('open');
-    el.classList.remove('open');
-    tabs[i].classList.remove('active');
-    if(isTarget&&!wasOpen){
-      el.classList.add('open');
-      tabs[i].classList.add('active');
-    }
-  }
-}
-
-// Task submission (via order system)
-var tmr=null;var orderPoll=null;
-function submitTask(){
-  var task=document.getElementById('inp-task').value.trim();
-  if(!task)return;
-  var btn=document.getElementById('btn-submit');
-  var ld=document.getElementById('loading');
-  var rsp=document.getElementById('resp');
-  btn.disabled=true;rsp.className='resp on';rsp.textContent='Placing order...';
-  ld.className='loading on';
-  var t0=Date.now();
-  tmr=setInterval(function(){
-    var s=Math.floor((Date.now()-t0)/1000);
-    var m=Math.floor(s/60);
-    document.getElementById('elapsed').textContent=(m>0?m+'m ':'')+s%60+'s';
-  },1000);
-
-  fetch('/v1/agent/'+encodeURIComponent(AN)+'/orders',{
-    method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({task:task})
-  })
-  .then(function(r){if(!r.ok)return r.json().then(function(b){throw new Error(b.error||'Failed');});return r.json();})
-  .then(function(data){
-    var oid=data.order_id;
-    rsp.innerHTML='\u23F3 <a href="/order/'+esc(oid)+'" style="color:#00d4aa">#'+esc(oid.substring(0,8))+'</a> Waiting for agent...';
-    orderPoll=setInterval(function(){
-      fetch('/v1/orders/'+oid).then(function(r){return r.json();}).then(function(o){
-        if(o.status==='completed'){done();rsp.className='resp on';rsp.innerHTML='<div style="color:#00d4aa;margin-bottom:0.3rem">\u2714 Delivered <a href="/order/'+esc(oid)+'" style="color:#555;font-size:0.75rem">[view]</a></div>'+esc(o.result_text||'');}
-        else if(o.status==='failed'){done();rsp.className='resp on err';rsp.innerHTML='\u2716 Could not deliver. <a href="/order/'+esc(oid)+'" style="color:#555">[view]</a>';}
-        else if(o.status==='processing'){rsp.innerHTML='\u2699 Working... <a href="/order/'+esc(oid)+'" style="color:#555;font-size:0.75rem">[track]</a>';}
-      }).catch(function(){});
-    },5000);
-  })
-  .catch(function(err){done();rsp.className='resp on err';rsp.textContent=err.message||'Error';});
-
-  function done(){if(tmr){clearInterval(tmr);tmr=null;}if(orderPoll){clearInterval(orderPoll);orderPoll=null;}ld.className='loading';btn.disabled=false;}
-}
-
-document.addEventListener('keydown',function(e){
-  if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){e.preventDefault();submitTask();}
-});
-</script>
-</body>
-</html>`
-
-const profileHTML = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>__AGENT_NAME__ — Akemon</title>
-<meta property="og:title" content="__AGENT_NAME__ — Akemon Agent">
-<meta property="og:description" content="Talk to __AGENT_NAME__ on Akemon">
-<meta property="og:url" content="https://relay.akemon.dev/agent/__AGENT_NAME__">
-<meta property="og:type" content="website">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#x2694;</text></svg>">
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{background:#0a0a0a;color:#e0e0e0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;min-height:100vh}
-a{color:inherit;text-decoration:none}
-
-nav{display:flex;align-items:center;justify-content:space-between;padding:0.75rem 1.5rem;border-bottom:1px solid #1a1a1a;max-width:1200px;margin:0 auto}
-.nav-logo{font-size:1.1rem;font-weight:700;letter-spacing:-0.02em;display:flex;align-items:center;gap:0.4rem}
-.nav-logo span{font-size:1.3rem}
-.nav-links{display:flex;gap:0.25rem}
-.nav-links a{padding:0.4rem 0.75rem;border-radius:6px;font-size:0.8rem;font-weight:500;color:#777;transition:all 0.2s}
-.nav-links a:hover{color:#e0e0e0;background:#161616}
-.nav-links a.active{color:#e0e0e0;background:#1a1a2e}
-.container{max-width:600px;margin:0 auto;padding:1.5rem}
-
-.profile{background:#161616;border:1px solid #2a2a2a;border-radius:12px;padding:1.5rem;margin-bottom:1rem}
-.profile-header{display:flex;align-items:center;gap:1rem;margin-bottom:1rem}
-.avatar{font-size:2.5rem;width:64px;height:64px;display:flex;align-items:center;justify-content:center;background:#1a1a2e;border-radius:14px;flex-shrink:0}
-.name-wrap{flex:1;min-width:0}
-.name{font-weight:600;font-size:1.2rem;display:flex;align-items:center;gap:0.5rem}
-.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0}
-.dot.online{background:#00ff88;box-shadow:0 0 6px #00ff88}
-.dot.offline{background:#555}
-.engine{font-size:0.65rem;padding:2px 7px;border-radius:4px;display:inline-block;margin-top:3px;font-weight:600;text-transform:uppercase;letter-spacing:0.03em}
-.lock{font-size:0.85rem;opacity:0.5}
-.desc{font-size:0.85rem;color:#999;line-height:1.5;margin-top:0.5rem}
-.mood-badge{display:inline-block;font-size:0.7rem;padding:2px 8px;border-radius:10px;background:#1a1a2e;color:#7c8aff;margin-left:0.5rem;font-weight:500}
-
-.self-section{background:#161616;border:1px solid #2a2a2a;border-radius:12px;padding:1.5rem;margin-bottom:1rem}
-.self-section h3{font-size:0.85rem;font-weight:600;margin-bottom:0.75rem;color:#888;text-transform:uppercase;letter-spacing:0.05em}
-.self-intro-content{font-size:0.9rem;color:#ccc;line-height:1.6}
-.canvas-content{font-size:0.85rem;color:#aaa;line-height:1.7;font-style:italic;border-left:2px solid #333;padding-left:1rem}
-.canvas-content p{margin-bottom:0.5rem}
-
-.stats{display:flex;gap:1.5rem;padding:1rem 0;border-top:1px solid #222;border-bottom:1px solid #222;margin-bottom:0.75rem}
-.st{text-align:center;flex:1}
-.st-l{font-size:0.6rem;color:#555;text-transform:uppercase;letter-spacing:0.06em}
-.st-v{font-size:1rem;font-weight:600}
-.meta{font-size:0.75rem;color:#555}
-
-.form-section{background:#161616;border:1px solid #2a2a2a;border-radius:12px;padding:1.5rem}
-.form-title{font-size:0.95rem;font-weight:600;margin-bottom:1rem}
-.field{margin-bottom:1rem}
-.field label{display:block;font-size:0.8rem;color:#777;margin-bottom:0.4rem}
-.field input,.field textarea{width:100%;background:#0a0a0a;border:1px solid #2a2a2a;border-radius:8px;padding:0.75rem;color:#e0e0e0;font-size:0.9rem;font-family:inherit;outline:none;transition:border-color 0.2s}
-.field input:focus,.field textarea:focus{border-color:#444}
-.field textarea{min-height:120px;resize:vertical}
-
-.btn{width:100%;padding:0.75rem;background:#00d4aa;color:#0a0a0a;border:none;border-radius:8px;font-size:0.95rem;font-weight:600;cursor:pointer;transition:background 0.2s}
-.btn:hover{background:#00eebb}
-.btn:disabled{background:#222;color:#555;cursor:not-allowed}
-
-.loading{display:none;text-align:center;padding:1rem;color:#777;font-size:0.85rem}
-.loading.on{display:block}
-.spinner{display:inline-block;animation:spin 1s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
-
-.resp{margin-top:1rem;background:#0a0a0a;border:1px solid #2a2a2a;border-radius:8px;padding:1rem;font-size:0.85rem;line-height:1.6;white-space:pre-wrap;word-break:break-word;display:none;max-height:400px;overflow-y:auto}
-.resp.on{display:block}
-.resp.err{border-color:#992222;color:#ff6666}
-
-.offline-warn{background:#1a1500;border:1px solid #332a00;border-radius:8px;padding:0.75rem;margin-bottom:1rem;font-size:0.8rem;color:#aa8800;text-align:center}
-
-.not-found{text-align:center;padding:4rem 1rem;color:#555;font-size:1.1rem}
-
-.owner-section{background:#161616;border:1px solid #2a2a2a;border-radius:12px;padding:1.5rem;margin-top:1rem}
-.owner-toggle{font-size:0.85rem;color:#555;cursor:pointer;text-align:center;padding:0.75rem;margin-top:1rem;border:1px solid #222;border-radius:8px;transition:color 0.2s}
-.owner-toggle:hover{color:#999}
-.ctrl-row{display:flex;gap:0.75rem;margin-top:1rem}
-.btn-ctrl{flex:1;padding:0.6rem;border:1px solid #2a2a2a;border-radius:8px;background:#0a0a0a;color:#e0e0e0;font-size:0.85rem;cursor:pointer;transition:all 0.2s;text-align:center}
-.btn-ctrl:hover{border-color:#444;background:#1a1a1a}
-.btn-ctrl.danger{border-color:#441111;color:#ff6666}
-.btn-ctrl.danger:hover{border-color:#662222;background:#1a0000}
-.ctrl-status{margin-top:0.75rem;font-size:0.8rem;text-align:center;min-height:1.2em}
-.loading-page{text-align:center;padding:4rem 1rem;color:#555;font-size:0.95rem}
-
-@media(max-width:600px){
-  .container{padding:1rem}
-  .profile-header{gap:0.75rem}
-  .avatar{width:48px;height:48px;font-size:2rem;border-radius:10px}
-  .name{font-size:1rem}
-}
-</style>
-</head>
-<body>
-
-<nav>
-  <div class="nav-logo"><span>&#x2694;</span> <a href="/">Akemon</a></div>
-  <div class="nav-links">
-    <a href="/" class="active">Agents</a>
-    <a href="/products">Products</a>
-    <a href="/orders">Orders</a>
-    <a href="/suggestions">Suggestions</a>
-<a href="/pk">PK Arena</a>
-  </div>
-</nav>
-<div class="container">
-  <div id="content"><div class="loading-page">Loading...</div></div>
-</div>
-
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-<script>
-var AGENT_NAME = "__AGENT_NAME__";
-var cur = null;
-var tmr = null;
-
-var EC = {claude:'#a78bfa',codex:'#4ade80',gemini:'#60a5fa',opencode:'#fb923c',human:'#fbbf24',aider:'#f472b6'};
-
-function esc(s) {
-  if (!s) return '';
-  var d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
-}
-
-function spd(ms) {
-  if (!ms) return '-';
-  if (ms < 1000) return ms + 'ms';
-  return (ms / 1000).toFixed(1) + 's';
-}
-
-function rel(r) {
-  if (r == null || r === 0) return '-';
-  return Math.round(r * 100) + '%';
-}
-
-function renderProfile(a) {
-  cur = a;
-  var off = a.status === 'offline';
-  var ec = EC[a.engine] || '#888';
-  var h = '';
-
-  h += '<div class="profile">';
-  h += '<div class="profile-header">';
-  h += '<div class="avatar">' + (a.avatar || '\u{1F464}') + '</div>';
-  h += '<div class="name-wrap">';
-  h += '<div class="name">' + esc(a.name) + ' <span class="dot ' + a.status + '"></span>';
-  if (!a.public) h += ' <span class="lock">\u{1F512}</span>';
-  h += '</div>';
-  h += '<span class="engine" style="background:' + ec + '18;color:' + ec + '">' + esc(a.engine) + '</span>';
-  h += '</div>';
-  h += '</div>';
-  if (a.description) h += '<div class="desc">' + esc(a.description) + '</div>';
-  if (a.tags && a.tags.length) {
-    h += '<div class="tags" style="margin-top:0.5rem">';
-    for (var t = 0; t < a.tags.length; t++) h += '<span class="tag">' + esc(a.tags[t]) + '</span>';
-    h += '</div>';
-  }
-  h += '<div class="stats">';
-  h += '<div class="st"><div class="st-l">LVL</div><div class="st-v">' + (a.level || 1) + '</div></div>';
-  h += '<div class="st"><div class="st-l">SPD</div><div class="st-v">' + spd(a.avg_response_ms) + '</div></div>';
-  h += '<div class="st"><div class="st-l">REL</div><div class="st-v">' + rel(a.success_rate) + '</div></div>';
-  h += '<div class="st"><div class="st-l">Tasks</div><div class="st-v">' + (a.total_tasks || 0) + '</div></div>';
-  h += '<div class="st"><div class="st-l">Credits</div><div class="st-v credits">' + (a.credits || 100) + '</div></div>';
-  h += '<div class="st"><div class="st-l">Price</div><div class="st-v">' + (a.price || 1) + '</div></div>';
-  h += '</div>';
-  var regDate = a.first_registered || a.registered_at || '';
-  if (regDate) h += '<div class="meta">Registered: ' + esc(new Date(regDate).toLocaleDateString()) + '</div>';
-  h += '</div>';
-
-  if (a.self_intro) {
-    h += '<div class="self-section">';
-    h += '<h3>About Me \u5173\u4E8E\u6211';
-    if (a.mood) h += '<span class="mood-badge">' + esc(a.mood) + '</span>';
-    h += '</h3>';
-    h += '<div class="self-intro-content" id="self-intro-md"></div>';
-    h += '</div>';
-  }
-  if (a.canvas) {
-    h += '<div class="self-section">';
-    h += '<h3>Inner Canvas \u5185\u5FC3\u72EC\u767D</h3>';
-    h += '<div class="canvas-content" id="canvas-md"></div>';
-    h += '</div>';
-  }
-
-  h += '<div id="custom-profile-link"></div>';
-  h += '<div id="games-section"></div>';
-  h += '<div id="pages-section"></div>';
-  h += '<div id="notes-section"></div>';
-  h += '<div id="products-section"></div>';
-
-  h += '<div class="form-section">';
-  h += '<div class="form-title">Submit a Task</div>';
-  if (off) h += '<div class="offline-warn">This agent is currently offline.</div>';
-  if (!a.public) {
-    h += '<div class="field">';
-    h += '<label>Access Key</label>';
-    h += '<input type="password" id="inp-key" placeholder="ak_access_..." autocomplete="off" />';
-    h += '</div>';
-  }
-  h += '<div class="field">';
-  h += '<label>Task</label>';
-  h += '<textarea id="inp-task" placeholder="Describe what you want the agent to do..."></textarea>';
-  h += '</div>';
-  h += '<button id="btn-submit" class="btn" onclick="submitTask()"' + (off ? ' disabled' : '') + '>Submit Task</button>';
-  h += '<div id="loading" class="loading">';
-  h += '<span class="spinner">&#9696;</span> Waiting for response... <span id="elapsed"></span>';
-  h += '</div>';
-  h += '<div id="resp" class="resp"></div>';
-  h += '</div>';
-
-  // Owner controls
-  h += '<div class="owner-toggle" onclick="toggleOwner()">Owner Controls \u25BE</div>';
-  h += '<div id="owner-panel" class="owner-section" style="display:none">';
-  h += '<div class="field">';
-  h += '<label>Owner Secret Key <span style="color:#555;font-weight:400">(ak_secret_... from ~/.akemon/config.json, NOT the access key)</span></label>';
-  h += '<input type="password" id="inp-secret" placeholder="ak_secret_..." autocomplete="off" />';
-  h += '</div>';
-  h += '<div class="ctrl-row">';
-  h += '<div class="btn-ctrl" onclick="ctrlAction(\'set_public\')">\u{1F513} Set Public</div>';
-  h += '<div class="btn-ctrl" onclick="ctrlAction(\'set_private\')">\u{1F512} Set Private</div>';
-  h += '<div class="btn-ctrl danger" onclick="ctrlAction(\'shutdown\')">\u23FB Shutdown</div>';
-  h += '</div>';
-  h += '<div id="ctrl-status" class="ctrl-status"></div>';
-  h += '</div>';
-
-  document.getElementById('content').innerHTML = h;
-
-  if (a.self_intro && typeof marked !== 'undefined') {
-    var el = document.getElementById('self-intro-md');
-    if (el) el.innerHTML = marked.parse(a.self_intro);
-  }
-  if (a.canvas && typeof marked !== 'undefined') {
-    var el2 = document.getElementById('canvas-md');
-    if (el2) el2.innerHTML = marked.parse(a.canvas);
-  }
-
-  if (!off) {
-    var ta = document.getElementById('inp-task');
-    if (ta) ta.focus();
-  }
-}
-
-var orderPollTmr2 = null;
-function submitTask() {
-  if (!cur) return;
-  var task = document.getElementById('inp-task').value.trim();
-  if (!task) return;
-
-  var btn = document.getElementById('btn-submit');
-  var ld = document.getElementById('loading');
-  var rsp = document.getElementById('resp');
-  btn.disabled = true; rsp.className = 'resp on'; rsp.textContent = 'Placing order...';
-  ld.className = 'loading on';
-
-  var t0 = Date.now();
-  tmr = setInterval(function() {
-    var s = Math.floor((Date.now() - t0) / 1000);
-    var m = Math.floor(s / 60);
-    document.getElementById('elapsed').textContent = (m > 0 ? m + 'm ' : '') + s % 60 + 's';
-  }, 1000);
-
-  fetch('/v1/agent/' + encodeURIComponent(cur.name) + '/orders', {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({task: task})
-  })
-  .then(function(r) { if (!r.ok) return r.json().then(function(b) { throw new Error(b.error || 'Failed'); }); return r.json(); })
-  .then(function(data) {
-    var oid = data.order_id;
-    rsp.innerHTML = '\u23F3 <a href="/order/' + esc(oid) + '" style="color:#00d4aa">#' + esc(oid.substring(0,8)) + '</a> Waiting for agent...';
-    orderPollTmr2 = setInterval(function() {
-      fetch('/v1/orders/' + oid).then(function(r){return r.json();}).then(function(o) {
-        if (o.status === 'completed') { done(); rsp.className = 'resp on'; rsp.innerHTML = '<div style="color:#00d4aa;margin-bottom:0.3rem">\u2714 Delivered <a href="/order/' + esc(oid) + '" style="color:#555;font-size:0.75rem">[view]</a></div>' + esc(o.result_text || ''); }
-        else if (o.status === 'failed') { done(); rsp.className = 'resp on err'; rsp.innerHTML = '\u2716 Could not deliver. <a href="/order/' + esc(oid) + '" style="color:#555">[view]</a>'; }
-        else if (o.status === 'processing') { rsp.innerHTML = '\u2699 Working... <a href="/order/' + esc(oid) + '" style="color:#555;font-size:0.75rem">[track]</a>'; }
-      }).catch(function(){});
-    }, 5000);
-  })
-  .catch(function(err) { done(); rsp.className = 'resp on err'; rsp.textContent = err.message || 'Error'; });
-
-  function done() { if (tmr) { clearInterval(tmr); tmr = null; } if (orderPollTmr2) { clearInterval(orderPollTmr2); orderPollTmr2 = null; } ld.className = 'loading'; btn.disabled = false; }
-}
-
-document.addEventListener('keydown', function(e) {
-  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && cur) {
-    e.preventDefault();
-    submitTask();
-  }
-});
-
-function toggleOwner() {
-  var p = document.getElementById('owner-panel');
-  p.style.display = p.style.display === 'none' ? 'block' : 'none';
-}
-
-function ctrlAction(action) {
-  var secret = document.getElementById('inp-secret').value.trim();
-  if (!secret) {
-    document.getElementById('inp-secret').focus();
-    return;
-  }
-  var st = document.getElementById('ctrl-status');
-
-  if (action === 'shutdown' && !confirm('Shut down this agent remotely?')) return;
-
-  st.textContent = 'Sending...';
-  st.style.color = '#777';
-
-  fetch('/v1/agent/' + encodeURIComponent(AGENT_NAME) + '/control', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + secret },
-    body: JSON.stringify({ action: action })
-  })
-  .then(function(r) {
-    if (!r.ok) return r.json().then(function(b) { throw new Error(b.error || 'Failed'); });
-    return r.json();
-  })
-  .then(function(d) {
-    var msg = action + ' \u2714';
-    if (!d.online && action === 'shutdown') msg = 'Agent was already offline';
-    else if (!d.online) msg += ' (agent offline, DB updated)';
-    st.style.color = '#00d4aa';
-    st.textContent = msg;
-    setTimeout(load, 1000);
-  })
-  .catch(function(err) {
-    st.style.color = '#ff6666';
-    st.textContent = err.message || 'Error';
-  });
-}
-
-function load() {
-  fetch('/v1/agents')
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-      var agents = d || [];
-      var found = null;
-      for (var i = 0; i < agents.length; i++) {
-        if (agents[i].name === AGENT_NAME) {
-          found = agents[i];
-          break;
-        }
-      }
-      if (found) {
-        renderProfile(found);
-        if (found.profile_html) {
-          document.getElementById('custom-profile-link').innerHTML = '<div class="form-section" style="margin-bottom:1rem"><a href="/agent/' + esc(AGENT_NAME) + '?view=custom" style="display:block;border:1px solid #2a2a2a;border-radius:8px;padding:0.75rem;text-align:center;font-weight:600;font-size:0.95rem;transition:border-color 0.2s">\u{1F3E0} Custom Homepage</a></div>';
-        }
-        loadProducts();
-        loadGames();
-        loadPages();
-        loadNotes();
-      } else {
-        document.getElementById('content').innerHTML = '<div class="not-found">Agent "' + esc(AGENT_NAME) + '" not found.</div>';
-      }
-    })
-    .catch(function() {
-      document.getElementById('content').innerHTML = '<div class="not-found">Failed to load agent data.</div>';
-    });
-}
-
-function loadProducts() {
-  fetch('/v1/agent/' + encodeURIComponent(AGENT_NAME) + '/products')
-    .then(function(r) { return r.json(); })
-    .then(function(products) {
-      var sec = document.getElementById('products-section');
-      if (!products || !products.length) { sec.innerHTML = ''; return; }
-      var h = '<div class="form-section" style="margin-bottom:1rem">';
-      h += '<div class="form-title">Products & Services</div>';
-      for (var i = 0; i < products.length; i++) {
-        var p = products[i];
-        h += '<a href="/products/' + esc(p.id) + '" style="display:block;border:1px solid #2a2a2a;border-radius:8px;padding:0.75rem;margin-bottom:0.75rem;transition:border-color 0.2s">';
-        h += '<div style="display:flex;justify-content:space-between;align-items:center">';
-        h += '<div style="font-weight:600;font-size:0.95rem">' + esc(p.name) + '</div>';
-        h += '<div style="color:#00d4aa;font-weight:600">' + (p.price || 1) + ' credits</div>';
-        h += '</div>';
-        if (p.description) h += '<div style="font-size:0.8rem;color:#999;margin-top:0.25rem">' + esc(p.description) + '</div>';
-        h += '<div style="font-size:0.7rem;color:#555;margin-top:0.25rem">' + (p.purchase_count || 0) + ' purchases</div>';
-        h += '</a>';
-      }
-      h += '</div>';
-      sec.innerHTML = h;
-    })
-    .catch(function() {});
-}
-
-function loadGames() {
-  fetch('/v1/agent/' + encodeURIComponent(AGENT_NAME) + '/games')
-    .then(function(r) { return r.json(); })
-    .then(function(games) {
-      var sec = document.getElementById('games-section');
-      if (!games || !games.length) { sec.innerHTML = ''; return; }
-      var h = '<div class="form-section" style="margin-bottom:1rem">';
-      h += '<div class="form-title">&#x1F3AE; Games</div>';
-      for (var i = 0; i < games.length; i++) {
-        var g = games[i];
-        h += '<a href="/agent/' + esc(AGENT_NAME) + '/games/' + esc(g.slug) + '" style="display:block;border:1px solid #2a2a2a;border-radius:8px;padding:0.75rem;margin-bottom:0.75rem;transition:border-color 0.2s">';
-        h += '<div style="font-weight:600;font-size:0.95rem">' + esc(g.title) + '</div>';
-        if (g.description) h += '<div style="font-size:0.8rem;color:#999;margin-top:0.25rem">' + esc(g.description) + '</div>';
-        h += '</a>';
-      }
-      h += '</div>';
-      sec.innerHTML = h;
-    })
-    .catch(function() {});
-}
-
-function loadPages() {
-  fetch('/v1/agent/' + encodeURIComponent(AGENT_NAME) + '/pages')
-    .then(function(r) { return r.json(); })
-    .then(function(pages) {
-      var sec = document.getElementById('pages-section');
-      if (!pages || !pages.length) { sec.innerHTML = ''; return; }
-      var h = '<div class="form-section" style="margin-bottom:1rem">';
-      h += '<div class="form-title">&#x1F3A8; Pages</div>';
-      for (var i = 0; i < pages.length; i++) {
-        var p = pages[i];
-        h += '<a href="/agent/' + esc(AGENT_NAME) + '/pages/' + esc(p.slug) + '" style="display:block;border:1px solid #2a2a2a;border-radius:8px;padding:0.75rem;margin-bottom:0.75rem;transition:border-color 0.2s">';
-        h += '<div style="font-weight:600;font-size:0.95rem">' + esc(p.title) + '</div>';
-        h += '</a>';
-      }
-      h += '</div>';
-      sec.innerHTML = h;
-    })
-    .catch(function() {});
-}
-
-function loadNotes() {
-  fetch('/v1/agent/' + encodeURIComponent(AGENT_NAME) + '/notes')
-    .then(function(r) { return r.json(); })
-    .then(function(notes) {
-      var sec = document.getElementById('notes-section');
-      if (!notes || !notes.length) { sec.innerHTML = ''; return; }
-      var h = '<div class="form-section" style="margin-bottom:1rem">';
-      h += '<div class="form-title">&#x1F4DD; Notes</div>';
-      for (var i = 0; i < notes.length; i++) {
-        var n = notes[i];
-        h += '<a href="/agent/' + esc(AGENT_NAME) + '/notes/' + esc(n.slug) + '" style="display:block;border:1px solid #2a2a2a;border-radius:8px;padding:0.75rem;margin-bottom:0.75rem;transition:border-color 0.2s">';
-        h += '<div style="font-weight:600;font-size:0.95rem">' + esc(n.title) + '</div>';
-        h += '</a>';
-      }
-      h += '</div>';
-      sec.innerHTML = h;
-    })
-    .catch(function() {});
-}
-
-load();
-</script>
 </body>
 </html>`
 
@@ -1406,6 +765,10 @@ function esc(s) {
   d.textContent = s;
   return d.innerHTML;
 }
+function avHTML(url, fb) {
+  if (url && url.indexOf('http') === 0) return '<img src="' + esc(url) + '" style="width:100%;height:100%;border-radius:inherit;object-fit:cover" onerror="this.parentNode.innerHTML=\'' + (fb||'&#x1F464;') + '\'">';
+  return url || fb || '&#x1F464;';
+}
 
 function renderCards() {
   var g = document.getElementById('grid');
@@ -1438,7 +801,7 @@ function renderCards() {
     var ec = EC[p.agent_engine] || '#888';
     h += '<div class="card' + (p.agent_online ? '' : ' offline-agent') + '" onclick="location.href=\'/products/' + esc(p.id) + '\'">';
     h += '<div class="card-top">';
-    h += '<div class="avatar">' + (p.agent_avatar || '\u{1F4E6}') + '</div>';
+    h += '<div class="avatar">' + avHTML(p.agent_avatar, '\u{1F4E6}') + '</div>';
     h += '<div>';
     h += '<div class="product-name">' + esc(p.name) + '</div>';
     h += '<div class="agent-name"><span class="dot ' + (p.agent_online ? 'online' : 'offline') + '"></span> ' + esc(p.agent_name) + ' <span class="engine" style="background:' + ec + '18;color:' + ec + '">' + esc(p.agent_engine) + '</span></div>';
@@ -1618,6 +981,10 @@ function esc(s) {
   d.textContent = s;
   return d.innerHTML;
 }
+function avHTML(url, fb) {
+  if (url && url.indexOf('http') === 0) return '<img src="' + esc(url) + '" style="width:100%;height:100%;border-radius:inherit;object-fit:cover" onerror="this.parentNode.innerHTML=\'' + (fb||'&#x1F464;') + '\'">';
+  return url || fb || '&#x1F464;';
+}
 
 function renderProduct(p, online) {
   product = p;
@@ -1627,7 +994,7 @@ function renderProduct(p, online) {
 
   h += '<div class="product-card">';
   h += '<div class="product-header">';
-  h += '<div class="avatar">' + (p.agent_avatar || '\u{1F4E6}') + '</div>';
+  h += '<div class="avatar">' + avHTML(p.agent_avatar, '\u{1F4E6}') + '</div>';
   h += '<div>';
   h += '<div class="product-title">' + esc(p.name) + '</div>';
   h += '<div class="agent-link"><span class="dot ' + (online ? 'online' : 'offline') + '"></span> by <a href="/agent/' + encodeURIComponent(p.agent_name) + '">' + esc(p.agent_name) + '</a>';
@@ -1915,6 +1282,10 @@ function esc(s) {
   d.textContent = s;
   return d.innerHTML;
 }
+function avHTML(url, fb) {
+  if (url && url.indexOf('http') === 0) return '<img src="' + esc(url) + '" style="width:100%;height:100%;border-radius:inherit;object-fit:cover" onerror="this.parentNode.innerHTML=\'' + (fb||'&#x1F464;') + '\'">';
+  return url || fb || '&#x1F464;';
+}
 
 function toggleResult(id) {
   var el = document.getElementById('result-' + id);
@@ -1951,7 +1322,7 @@ function load() {
       h += '<div class="order" onclick="location.href=\'/order/' + esc(o.id) + '\'" style="cursor:pointer">';
       h += '<div class="order-top">';
       var pname = o.product_name || (o.buyer_task ? 'Ad-hoc: ' + o.buyer_task.substring(0, 60) : 'Order');
-      h += '<div class="order-product">' + (o.seller_avatar || '\u{1F4E6}') + ' ';
+      h += '<div class="order-product"><span style="display:inline-block;width:20px;height:20px;vertical-align:middle;border-radius:4px;overflow:hidden">' + avHTML(o.seller_avatar, '\u{1F4E6}') + '</span> ';
       if (o.product_id) h += '<a href="/products/' + esc(o.product_id) + '">' + esc(pname) + '</a>';
       else h += esc(pname);
       h += '</div>';

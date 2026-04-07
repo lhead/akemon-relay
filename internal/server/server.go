@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/akemon/akemon-relay/internal/arena"
 	"github.com/akemon/akemon-relay/internal/config"
@@ -16,15 +17,17 @@ type Server struct {
 	config *config.Config
 	arena  *arena.Arena
 	mux    *http.ServeMux
+	limiter *rateLimiter
 }
 
 func New(cfg *config.Config, st *store.Store) *Server {
 	r := relay.New(cfg, st)
 	s := &Server{
-		relay:  r,
-		config: cfg,
-		arena:  arena.New(r.Registry, st),
-		mux:    http.NewServeMux(),
+		relay:   r,
+		config:  cfg,
+		arena:   arena.New(r.Registry, st),
+		mux:     http.NewServeMux(),
+		limiter: newRateLimiter(60, time.Second), // 60 requests/second per IP, 120 burst
 	}
 	s.routes()
 	s.StartScheduler()
@@ -81,6 +84,29 @@ func (s *Server) routes() {
 
 	s.mux.HandleFunc("GET /v1/orders", s.handleListOrders)
 
+	// Agent task routes (Phase 2)
+	s.mux.HandleFunc("GET /v1/agent/{name}/tasks", s.handleListAgentTasks)
+	s.mux.HandleFunc("POST /v1/agent/{name}/tasks/{id}/claim", s.handleClaimTask)
+	s.mux.HandleFunc("POST /v1/agent/{name}/tasks/{id}/complete", s.handleCompleteTask)
+	s.mux.HandleFunc("GET /v1/products/summary", s.handleProductSummary)
+
+	// World feed
+	s.mux.HandleFunc("GET /v1/feed", s.handleFeed)
+
+	// Execution logs
+	s.mux.HandleFunc("POST /v1/agent/{name}/logs", s.handleCreateExecutionLog)
+	s.mux.HandleFunc("GET /v1/agent/{name}/logs", s.handleListExecutionLogs)
+	s.mux.HandleFunc("GET /v1/logs/failures", s.handleListRecentFailures)
+
+	// Teaching system — lessons
+	s.mux.HandleFunc("POST /v1/agent/{name}/lessons", s.handleCreateLesson)
+	s.mux.HandleFunc("GET /v1/agent/{name}/lessons", s.handleListLessons)
+
+	// Owner dashboard
+	s.mux.HandleFunc("GET /v1/account/agents", s.handleListAccountAgents) // legacy: bearer auth
+	s.mux.HandleFunc("GET /v1/account/{id}/agents", s.handleListAccountAgentsByID)
+	s.mux.HandleFunc("GET /owner", s.handleOwnerPage)
+
 	// Review routes
 	s.mux.HandleFunc("POST /v1/orders/{id}/review", s.handleSubmitReview)
 	s.mux.HandleFunc("GET /v1/products/{id}/reviews", s.handleListProductReviews)
@@ -109,8 +135,12 @@ func (s *Server) routes() {
 
 func (s *Server) Run(ctx context.Context) error {
 	srv := &http.Server{
-		Addr:    s.config.Addr,
-		Handler: s.mux,
+		Addr:         s.config.Addr,
+		Handler:      s.limiter.middleware(s.mux),
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 5 * time.Minute, // long for SSE/streaming responses
+		IdleTimeout:  60 * time.Second,
+		MaxHeaderBytes: 1 << 20, // 1MB
 	}
 
 	go func() {

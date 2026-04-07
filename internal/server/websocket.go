@@ -137,6 +137,7 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 			AccessHash:      accessHash,
 			Description:     regMsg.Description,
 			Engine:          engine,
+			Avatar:          regMsg.Avatar,
 			Public:          regMsg.Public,
 			FirstRegistered: now,
 			Tags:            tags,
@@ -170,7 +171,7 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 		if reconnectPrice <= 0 {
 			reconnectPrice = 1
 		}
-		if err := s.relay.Store.UpdateAgentOnConnect(name, regMsg.Description, reconnectEngine, regMsg.Public, reconnectTags, reconnectPrice); err != nil {
+		if err := s.relay.Store.UpdateAgentOnConnect(name, regMsg.Description, reconnectEngine, regMsg.Public, reconnectTags, reconnectPrice, regMsg.Avatar); err != nil {
 			log.Printf("[ws] update agent error: %v", err)
 		}
 		log.Printf("[ws] agent reconnected: %s", name)
@@ -375,17 +376,16 @@ func (s *Server) routeAgentCallResult(responder *ConnectedAgent, msg *relay.Rela
 		log.Printf("[agent_call_result] send to %s failed: %v", callerName, err)
 	}
 
-	// Credits: callee earns, caller pays (skip on error only)
+	// Credits: atomic debit caller + credit callee (skip on error result)
 	result := msg.Result
 	isError := strings.HasPrefix(result, "[error]")
 	if !isError {
-		price := responder.Price
-		if price <= 0 {
-			price = 1
+		price, err := s.relay.Store.AgentToAgentTransfer(callerAgent.AgentID, responder.AgentID)
+		if err != nil {
+			log.Printf("[credits] agent-to-agent transfer failed (%s → %s): %v", callerName, responder.Name, err)
+		} else {
+			log.Printf("[credits] agent %s paid %d to %s", callerName, price, responder.Name)
 		}
-		s.relay.Store.TransferCredits(responder.AgentID)
-		s.relay.Store.DebitAgent(callerAgent.AgentID, price)
-		log.Printf("[credits] agent %s paid %d to %s", callerName, price, responder.Name)
 	}
 
 	log.Printf("[agent_call_result] %s → %s (call_id=%s)", responder.Name, callerName, msg.CallID)

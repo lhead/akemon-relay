@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -18,7 +19,7 @@ func (s *Server) handlePKTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	token := auth.ExtractBearer(r)
-	if token != s.config.AdminSecret {
+	if subtle.ConstantTimeCompare([]byte(token), []byte(s.config.AdminSecret)) != 1 {
 		jsonError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
