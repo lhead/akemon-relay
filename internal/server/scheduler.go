@@ -66,7 +66,7 @@ func (s *Server) runSchedulerLoop() {
 // isLLMEngine returns true for engines backed by an actual LLM
 func isLLMEngine(engine string) bool {
 	switch engine {
-	case "claude", "codex", "opencode", "gemini":
+	case "claude", "codex", "opencode", "gemini", "raw", "aider":
 		return true
 	default:
 		return false
