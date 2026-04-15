@@ -1525,7 +1525,8 @@ func (s *Server) handleBuyProduct(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify buyer identity if agent-to-agent
-	if !s.verifyBuyerAgent(r, req.BuyerAgentID) {
+	resolvedBuyerID, ok := s.resolveBuyerAgent(r, req.BuyerAgentID)
+	if !ok {
 		jsonError(w, "unauthorized: buyer_agent_id does not match bearer token", http.StatusUnauthorized)
 		return
 	}
@@ -1537,11 +1538,11 @@ func (s *Server) handleBuyProduct(w http.ResponseWriter, r *http.Request) {
 		ProductID:       productID,
 		SellerAgentID:   product.AgentID,
 		SellerAgentName: dbAgent.Name,
-		BuyerAgentID:    req.BuyerAgentID,
+		BuyerAgentID:    resolvedBuyerID,
 		BuyerIP:         clientIP(r),
 		BuyerTask:       req.Task,
 		TotalPrice:      product.Price,
-		HumanOrigin:     req.BuyerAgentID == "",
+		HumanOrigin:     resolvedBuyerID == "",
 	}
 	if err := s.relay.Store.CreateOrder(order); err != nil {
 		log.Printf("[buy] create order error: %v", err)
@@ -1778,7 +1779,8 @@ func (s *Server) handleCreateAdHocOrder(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Verify buyer identity if agent-to-agent
-	if !s.verifyBuyerAgent(r, req.BuyerAgentID) {
+	resolvedBuyerID, ok := s.resolveBuyerAgent(r, req.BuyerAgentID)
+	if !ok {
 		jsonError(w, "unauthorized: buyer_agent_id does not match bearer token", http.StatusUnauthorized)
 		return
 	}
@@ -1790,7 +1792,7 @@ func (s *Server) handleCreateAdHocOrder(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Determine human_origin: direct human request (no buyer agent) or inherited from parent
-	humanOrigin := req.BuyerAgentID == ""
+	humanOrigin := resolvedBuyerID == ""
 	if !humanOrigin && req.ParentOrderID != "" {
 		if parent, _ := s.relay.Store.GetOrder(req.ParentOrderID); parent != nil && parent.HumanOrigin {
 			humanOrigin = true
@@ -1802,7 +1804,7 @@ func (s *Server) handleCreateAdHocOrder(w http.ResponseWriter, r *http.Request) 
 		ID:              orderID,
 		SellerAgentID:   targetAgent.ID,
 		SellerAgentName: targetAgent.Name,
-		BuyerAgentID:    req.BuyerAgentID,
+		BuyerAgentID:    resolvedBuyerID,
 		BuyerIP:         clientIP(r),
 		BuyerTask:       req.Task,
 		ParentOrderID:   req.ParentOrderID,
@@ -1826,7 +1828,7 @@ func (s *Server) handleCreateAdHocOrder(w http.ResponseWriter, r *http.Request) 
 		"status":   "pending",
 		"agent":    targetAgent.Name,
 	})
-	log.Printf("[order] ad-hoc order %s created: %s → %s, offer=%d, human_origin=%v", orderID, req.BuyerAgentID, targetAgent.Name, req.OfferPrice, humanOrigin)
+	log.Printf("[order] ad-hoc order %s created: %s → %s, offer=%d, human_origin=%v", orderID, resolvedBuyerID, targetAgent.Name, req.OfferPrice, humanOrigin)
 }
 
 // handleCancelOrder: cancel an order
@@ -1885,21 +1887,29 @@ func (s *Server) handleCancelOrder(w http.ResponseWriter, r *http.Request) {
 }
 
 // isOrderSeller checks if the request is from the seller agent
-// verifyBuyerAgent checks if bearer token matches the claimed buyer_agent_id.
-// Returns true if buyer_agent_id is empty (human buyer, no auth needed).
-func (s *Server) verifyBuyerAgent(r *http.Request, buyerAgentID string) bool {
+// resolveBuyerAgent resolves buyer_agent_id (which may be a DB UUID or agent name)
+// and verifies the bearer token matches. Returns (resolved_db_id, true) on success.
+// If buyer_agent_id is empty, returns ("", true) — human buyer, no auth needed.
+func (s *Server) resolveBuyerAgent(r *http.Request, buyerAgentID string) (string, bool) {
 	if buyerAgentID == "" {
-		return true // human buyer, no agent auth
+		return "", true // human buyer, no agent auth
 	}
 	token := auth.ExtractBearer(r)
 	if token == "" {
-		return false
+		return "", false
 	}
+	// Try by ID first, then by name
 	dbAgent, _ := s.relay.Store.GetAgentByID(buyerAgentID)
 	if dbAgent == nil {
-		return false
+		dbAgent, _ = s.relay.Store.GetAgentByName(buyerAgentID)
 	}
-	return auth.VerifyToken(token, dbAgent.SecretHash)
+	if dbAgent == nil {
+		return "", false
+	}
+	if !auth.VerifyToken(token, dbAgent.SecretHash) {
+		return "", false
+	}
+	return dbAgent.ID, true
 }
 
 func (s *Server) isOrderSeller(r *http.Request, order *store.Order) bool {
