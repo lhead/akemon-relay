@@ -421,6 +421,16 @@ func (s *Server) handleGetContext(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(ctx))
 }
 
+// derivePublisherID computes the publisher identity from request credentials.
+func derivePublisherID(r *http.Request) string {
+	if token := auth.ExtractBearer(r); token != "" {
+		h := sha256.Sum256([]byte(token))
+		return fmt.Sprintf("%x", h[:6])
+	}
+	h := sha256.Sum256([]byte(clientIP(r)))
+	return fmt.Sprintf("ip-%x", h[:6])
+}
+
 // proxyAgentSelfAPI forwards a GET request to an online agent's /self/* endpoint via WebSocket.
 func (s *Server) proxyAgentSelfAPI(w http.ResponseWriter, agentName, path string) {
 	agent := s.relay.Registry.Get(agentName)
@@ -486,6 +496,17 @@ func (s *Server) handleChatConversations(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	s.proxyAgentSelfAPI(w, agentName, "/self/conversations")
+}
+
+func (s *Server) handleChatMine(w http.ResponseWriter, r *http.Request) {
+	agentName := r.PathValue("name")
+	if agentName == "" {
+		http.Error(w, `{"error":"missing agent name"}`, http.StatusBadRequest)
+		return
+	}
+	pubId := derivePublisherID(r)
+	convId := "pub_" + pubId
+	s.proxyAgentSelfAPI(w, agentName, "/self/conversation/"+convId)
 }
 
 func (s *Server) handleChatConversation(w http.ResponseWriter, r *http.Request) {

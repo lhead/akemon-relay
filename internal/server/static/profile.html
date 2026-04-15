@@ -662,17 +662,38 @@ function loadChat() {
   var sec = document.getElementById('chat-messages');
   if (!sec) return;
 
+  // Load the current user's own conversation with this agent
+  fetch('/v1/agent/' + encodeURIComponent(AGENT_NAME) + '/chat/mine')
+  .then(function(r) { return r.ok ? r.json() : null; })
+  .then(function(data) {
+    if (!data || (!data.rounds.length && !data.summary)) {
+      sec.innerHTML = '<div class="empty-state">No conversation yet. Send a message to start.</div>'
+        + '<div style="text-align:center;margin-top:8px"><button class="chat-back" onclick="loadAllConvs()">View all conversations</button></div>';
+      return;
+    }
+    renderChat(data);
+  })
+  .catch(function() {
+    sec.innerHTML = '<div class="empty-state">Could not load chat. Agent may be offline.</div>';
+  });
+}
+
+function loadAllConvs() {
+  var sec = document.getElementById('chat-messages');
+  if (!sec) return;
+  sec.innerHTML = '<div class="empty-state">Loading...</div>';
+
   fetch('/v1/agent/' + encodeURIComponent(AGENT_NAME) + '/chat/history')
   .then(function(r) { return r.ok ? r.json() : []; })
   .then(function(list) {
     if (!list || !list.length) {
-      sec.innerHTML = '<div class="empty-state">No conversations yet. Send a message to start.</div>';
+      sec.innerHTML = '<div class="empty-state">No conversations.</div>';
       return;
     }
     renderConvList(list);
   })
   .catch(function() {
-    sec.innerHTML = '<div class="empty-state">Could not load chat history.</div>';
+    sec.innerHTML = '<div class="empty-state">Could not load conversations.</div>';
   });
 }
 
@@ -705,7 +726,7 @@ function openConv(id) {
 function renderChat(data) {
   var sec = document.getElementById('chat-messages');
   if (!sec) return;
-  var h = '<button class="chat-back" onclick="loadChat()">&larr; All conversations</button>';
+  var h = '<div style="display:flex;justify-content:space-between;align-items:center"><button class="chat-back" onclick="loadChat()">&larr; My conversation</button><button class="chat-back" onclick="loadAllConvs()">All conversations</button></div>';
 
   // Summary block
   if (data.summary) {
