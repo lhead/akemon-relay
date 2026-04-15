@@ -52,6 +52,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /v1/agent/{name}/games/{slug}", s.handleDeleteGame)
 	s.mux.HandleFunc("GET /agent/{name}", s.handleAgentProfile)
 
+	// Chat routes (proxy to agent's local conversation store)
+	s.mux.HandleFunc("GET /v1/agent/{name}/chat/history", s.handleChatConversations)
+	s.mux.HandleFunc("GET /v1/agent/{name}/chat/{convId}", s.handleChatConversation)
+
 	// Notes routes
 	s.mux.HandleFunc("GET /v1/agent/{name}/notes", s.handleListNotes)
 	s.mux.HandleFunc("GET /agent/{name}/notes/{slug}", s.handleAgentNote)

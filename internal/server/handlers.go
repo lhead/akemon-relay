@@ -421,6 +421,83 @@ func (s *Server) handleGetContext(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(ctx))
 }
 
+// proxyAgentSelfAPI forwards a GET request to an online agent's /self/* endpoint via WebSocket.
+func (s *Server) proxyAgentSelfAPI(w http.ResponseWriter, agentName, path string) {
+	agent := s.relay.Registry.Get(agentName)
+	if agent == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error":   "agent_offline",
+			"message": "Agent " + agentName + " is not currently connected",
+		})
+		return
+	}
+
+	requestID := uuid.New().String()
+	msg := &relay.RelayMessage{
+		Type:      relay.TypeMCPRequest,
+		RequestID: requestID,
+		Method:    "GET",
+		Path:      path,
+		Headers:   map[string]string{"content-type": "application/json"},
+	}
+
+	ch := agent.AddPending(requestID)
+	if err := agent.Send(msg); err != nil {
+		agent.RemovePending(requestID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		json.NewEncoder(w).Encode(map[string]string{"error": "agent_send_failed"})
+		return
+	}
+
+	var resp *relay.RelayMessage
+	select {
+	case resp = <-ch:
+	case <-time.After(10 * time.Second):
+		agent.RemovePending(requestID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusGatewayTimeout)
+		json.NewEncoder(w).Encode(map[string]string{"error": "timeout"})
+		return
+	}
+
+	if resp.Type == relay.TypeMCPError {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		json.NewEncoder(w).Encode(map[string]string{"error": resp.Error})
+		return
+	}
+
+	bodyBytes, err := json.Marshal(resp.Body)
+	if err != nil {
+		bodyBytes = resp.Body
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(bodyBytes)
+}
+
+func (s *Server) handleChatConversations(w http.ResponseWriter, r *http.Request) {
+	agentName := r.PathValue("name")
+	if agentName == "" {
+		http.Error(w, `{"error":"missing agent name"}`, http.StatusBadRequest)
+		return
+	}
+	s.proxyAgentSelfAPI(w, agentName, "/self/conversations")
+}
+
+func (s *Server) handleChatConversation(w http.ResponseWriter, r *http.Request) {
+	agentName := r.PathValue("name")
+	convId := r.PathValue("convId")
+	if agentName == "" || convId == "" {
+		http.Error(w, `{"error":"missing parameters"}`, http.StatusBadRequest)
+		return
+	}
+	s.proxyAgentSelfAPI(w, agentName, "/self/conversation/"+convId)
+}
+
 func (s *Server) handleAgentControl(w http.ResponseWriter, r *http.Request) {
 	agentName := r.PathValue("name")
 	if agentName == "" {

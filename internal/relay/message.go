@@ -28,6 +28,9 @@ type RelayMessage struct {
 	Headers   map[string]string `json:"headers,omitempty"`
 	Body      json.RawMessage   `json:"body,omitempty"`
 
+	// Path override (default "/mcp" for MCP requests)
+	Path string `json:"path,omitempty"`
+
 	// Response fields
 	StatusCode      int               `json:"status_code,omitempty"`
 	ResponseHeaders map[string]string `json:"response_headers,omitempty"`
