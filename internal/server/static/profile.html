@@ -150,6 +150,11 @@ nav { position: sticky; top: 0; z-index: 100; background: rgba(255,255,255,0.85)
 .chat-send:hover { background: #000; }
 .chat-send:disabled { background: #e5e5e5; color: #999; cursor: not-allowed; }
 .chat-status { font-size: 12px; color: #aaa; text-align: center; padding: 4px; }
+.chat-conv-item { padding: 12px 16px; cursor: pointer; transition: background 0.1s; }
+.chat-conv-item:hover { background: #fafafa; }
+.chat-conv-item + .chat-conv-item { box-shadow: rgba(0,0,0,0.06) 0px -1px 0px; }
+.chat-back { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; margin-bottom: 8px; font-size: 12px; color: #666; cursor: pointer; border-radius: 6px; background: none; border: none; font-family: 'Inter', Arial, sans-serif; }
+.chat-back:hover { color: #171717; background: #f5f5f5; }
 
 /* Home iframe */
 .home-iframe { width: 100%; border: none; display: block; }
@@ -657,7 +662,6 @@ function loadChat() {
   var sec = document.getElementById('chat-messages');
   if (!sec) return;
 
-  // First get conversation list, pick the first (most recent)
   fetch('/v1/agent/' + encodeURIComponent(AGENT_NAME) + '/chat/history')
   .then(function(r) { return r.ok ? r.json() : []; })
   .then(function(list) {
@@ -665,23 +669,43 @@ function loadChat() {
       sec.innerHTML = '<div class="empty-state">No conversations yet. Send a message to start.</div>';
       return;
     }
-    chatConvId = list[0].id;
-    return fetch('/v1/agent/' + encodeURIComponent(AGENT_NAME) + '/chat/' + encodeURIComponent(chatConvId));
-  })
-  .then(function(r) { if (r) return r.json(); })
-  .then(function(data) {
-    if (!data) return;
-    renderChat(data);
+    renderConvList(list);
   })
   .catch(function() {
     sec.innerHTML = '<div class="empty-state">Could not load chat history.</div>';
   });
 }
 
-function renderChat(data) {
+function renderConvList(list) {
   var sec = document.getElementById('chat-messages');
   if (!sec) return;
   var h = '';
+  list.forEach(function(c) {
+    var label = c.id.replace(/^pub_/, '').replace(/^ses_/, 'session:');
+    h += '<div class="chat-conv-item" onclick="openConv(\'' + esc(c.id) + '\')">';
+    h += '<div style="font-size:14px;font-weight:500;color:#171717">' + esc(label) + '</div>';
+    h += '<div style="font-size:12px;color:#888">' + c.roundCount + ' messages &middot; ' + fmtTime(c.lastActive) + '</div>';
+    h += '</div>';
+  });
+  sec.innerHTML = h;
+}
+
+function openConv(id) {
+  chatConvId = id;
+  var sec = document.getElementById('chat-messages');
+  if (sec) sec.innerHTML = '<div class="empty-state">Loading...</div>';
+  fetch('/v1/agent/' + encodeURIComponent(AGENT_NAME) + '/chat/' + encodeURIComponent(id))
+  .then(function(r) { return r.json(); })
+  .then(function(data) { renderChat(data); })
+  .catch(function() {
+    if (sec) sec.innerHTML = '<div class="empty-state">Could not load conversation.</div>';
+  });
+}
+
+function renderChat(data) {
+  var sec = document.getElementById('chat-messages');
+  if (!sec) return;
+  var h = '<button class="chat-back" onclick="loadChat()">&larr; All conversations</button>';
 
   // Summary block
   if (data.summary) {
