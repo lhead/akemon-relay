@@ -1010,12 +1010,18 @@ var agentOnline = false;
 var activeOrders = {}; // orderID -> pollInterval
 var EC = {claude:'#7c3aed',codex:'#16a34a',gemini:'#2563eb',opencode:'#ea580c',human:'#d97706',aider:'#db2777'};
 
-// Auth
-function getToken() { return localStorage.getItem('akemon_token') || ''; }
+// Auth — ensure every browser gets a unique identity
+function getToken() {
+  var t = localStorage.getItem('akemon_token');
+  if (!t) {
+    t = 'anon_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
+    localStorage.setItem('akemon_token', t);
+  }
+  return t;
+}
 function authHeaders(extra) {
   var h = extra || {};
-  var t = getToken();
-  if (t) h['Authorization'] = 'Bearer ' + t;
+  h['Authorization'] = 'Bearer ' + getToken();
   return h;
 }
 function authFetch(url, opts) {
@@ -1063,7 +1069,7 @@ function renderProduct(p, online) {
   h += '</div></div></div>';
 
   h += '<div class="meta-row">';
-  h += '<div class="meta-item"><div class="meta-label">Price</div><div class="meta-value price">' + (p.price || 0) + ' \\u00A2</div></div>';
+  h += '<div class="meta-item"><div class="meta-label">Price</div><div class="meta-value price">' + (p.price || 0) + ' ¢</div></div>';
   h += '<div class="meta-item"><div class="meta-label">Purchases</div><div class="meta-value">' + (p.purchase_count || 0) + '</div></div>';
   h += '<div class="meta-item"><div class="meta-label">Listed</div><div class="meta-value" style="font-size:13px">' + (p.created_at ? new Date(p.created_at).toLocaleDateString() : '') + '</div></div>';
   h += '</div>';
@@ -1085,7 +1091,7 @@ function renderProduct(p, online) {
   h += '<div class="chat-input-row">';
   h += '<textarea id="chat-input" placeholder="Ask about this product..." rows="1"' + (off ? ' disabled' : '') + '></textarea>';
   h += '<button class="chat-send" id="btn-send" onclick="sendChat()"' + (off ? ' disabled' : '') + '>Send</button>';
-  h += '<button class="chat-buy" id="btn-buy" onclick="buyProduct()"' + (off ? ' disabled' : '') + '>Buy \\u26A1</button>';
+  h += '<button class="chat-buy" id="btn-buy" onclick="buyProduct()"' + (off ? ' disabled' : '') + '>Buy ⚡</button>';
   h += '</div></div></div>';
 
   // Reviews
@@ -1278,7 +1284,7 @@ function buyProduct() {
   // Order card (processing)
   var card = document.createElement('div');
   card.className = 'chat-order-card';
-  card.innerHTML = '<div class="order-status"><span class="order-spinner">\\u29D6</span> Placing order...</div><div class="order-task">' + esc(task.substring(0, 200)) + '</div>';
+  card.innerHTML = '<div class="order-status"><span class="order-spinner">⏳</span> Placing order...</div><div class="order-task">' + esc(task.substring(0, 200)) + '</div>';
   sec.appendChild(card);
   sec.scrollTop = sec.scrollHeight;
 
@@ -1298,12 +1304,12 @@ function buyProduct() {
   })
   .then(function(data) {
     var oid = data.order_id;
-    card.innerHTML = '<div class="order-status"><span class="order-spinner">\\u29D6</span> Order <a href="/order/' + esc(oid) + '" style="color:#92400e">#' + esc(oid.substring(0, 8)) + '</a> \\u00B7 pending</div><div class="order-task">' + esc(task.substring(0, 200)) + '</div>';
+    card.innerHTML = '<div class="order-status"><span class="order-spinner">⏳</span> Order <a href="/order/' + esc(oid) + '" style="color:#92400e">#' + esc(oid.substring(0, 8)) + '</a> · pending</div><div class="order-task">' + esc(task.substring(0, 200)) + '</div>';
     pollBuyOrder(oid, card, sec);
   })
   .catch(function(err) {
     card.className = 'chat-fail-card';
-    card.innerHTML = '\\u2716 ' + esc(err.message || 'Order failed');
+    card.innerHTML = '✖ ' + esc(err.message || 'Order failed');
     buyBtn.disabled = !agentOnline;
     sendBtn.disabled = !agentOnline;
   });
@@ -1315,7 +1321,7 @@ function pollBuyOrder(oid, card, sec) {
     .then(function(r) { return r.json(); })
     .then(function(o) {
       if (o.status === 'processing') {
-        card.querySelector('.order-status').innerHTML = '<span class="order-spinner">\\u29D6</span> Order <a href="/order/' + esc(oid) + '" style="color:#92400e">#' + esc(oid.substring(0, 8)) + '</a> \\u00B7 processing' + (o.retry_count > 0 ? ' (retry ' + o.retry_count + ')' : '');
+        card.querySelector('.order-status').innerHTML = '<span class="order-spinner">⏳</span> Order <a href="/order/' + esc(oid) + '" style="color:#92400e">#' + esc(oid.substring(0, 8)) + '</a> · processing' + (o.retry_count > 0 ? ' (retry ' + o.retry_count + ')' : '');
       } else if (o.status === 'completed') {
         clearInterval(poll);
         enableInput();
@@ -1323,15 +1329,15 @@ function pollBuyOrder(oid, card, sec) {
         var result = o.result_text || '';
         var preview = result.substring(0, 300);
         var hasMore = result.length > 300;
-        var dh = '<div class="delivery-header">\\u2714 Delivered <a href="/order/' + esc(oid) + '" style="color:#166534;font-size:11px">#' + esc(oid.substring(0,8)) + '</a></div>';
+        var dh = '<div class="delivery-header">✔ Delivered <a href="/order/' + esc(oid) + '" style="color:#166534;font-size:11px">#' + esc(oid.substring(0,8)) + '</a></div>';
         dh += '<div class="delivery-preview">' + esc(preview) + (hasMore ? '...' : '') + '</div>';
         if (hasMore) {
           dh += '<button class="delivery-toggle" onclick="this.previousElementSibling.style.display=\'none\';this.nextElementSibling.classList.add(\'show\');this.style.display=\'none\'">Show full result</button>';
           dh += '<div class="delivery-full">' + esc(result) + '</div>';
         }
         dh += '<div class="delivery-actions">';
-        dh += '<button class="btn-confirm" onclick="confirmOrd(\'' + esc(oid) + '\',this)">\\u2714 Looks good</button>';
-        dh += '<button class="btn-cancel" onclick="cancelOrd(\'' + esc(oid) + '\',this)">\\u2716 Not satisfied</button>';
+        dh += '<button class="btn-confirm" onclick="confirmOrd(\'' + esc(oid) + '\',this)">✔ Looks good</button>';
+        dh += '<button class="btn-cancel" onclick="cancelOrd(\'' + esc(oid) + '\',this)">✖ Not satisfied</button>';
         dh += '</div>';
         card.className = 'chat-delivery-card';
         card.innerHTML = dh;
@@ -1340,7 +1346,7 @@ function pollBuyOrder(oid, card, sec) {
         clearInterval(poll);
         enableInput();
         card.className = 'chat-fail-card';
-        card.innerHTML = '\\u2716 Order ' + (o.status === 'failed' ? 'failed' : 'cancelled') + '. <a href="/order/' + esc(oid) + '" style="color:#991b1b">#' + esc(oid.substring(0,8)) + '</a>';
+        card.innerHTML = '✖ Order ' + (o.status === 'failed' ? 'failed' : 'cancelled') + '. <a href="/order/' + esc(oid) + '" style="color:#991b1b">#' + esc(oid.substring(0,8)) + '</a>';
         sec.scrollTop = sec.scrollHeight;
       }
     })
@@ -1359,14 +1365,14 @@ function enableInput() {
 function confirmOrd(oid, btn) {
   var card = btn.closest('.chat-delivery-card');
   var actions = card.querySelector('.delivery-actions');
-  actions.innerHTML = '<span style="color:#166534;font-size:12px">\\u2714 Confirmed! Thank you.</span>';
+  actions.innerHTML = '<span style="color:#166534;font-size:12px">✔ Confirmed! Thank you.</span>';
   authFetch('/v1/orders/' + oid + '/confirm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(function(){});
 }
 
 function cancelOrd(oid, btn) {
   var card = btn.closest('.chat-delivery-card');
   var actions = card.querySelector('.delivery-actions');
-  actions.innerHTML = '<span style="color:#991b1b;font-size:12px">\\u2716 Cancelled. No charges.</span>';
+  actions.innerHTML = '<span style="color:#991b1b;font-size:12px">✖ Cancelled. No charges.</span>';
   card.className = 'chat-fail-card';
   authFetch('/v1/orders/' + oid + '/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(function(){});
 }
@@ -1375,7 +1381,7 @@ function cancelOrd(oid, btn) {
 
 function starHTML(rating) {
   var s = '';
-  for (var i = 1; i <= 5; i++) s += i <= rating ? '\\u2605' : '\\u2606';
+  for (var i = 1; i <= 5; i++) s += i <= rating ? '\u2605' : '\u2606';
   return s;
 }
 

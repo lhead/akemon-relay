@@ -9,6 +9,9 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/css/xterm.css">
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0/lib/addon-fit.js"></script>
 <style>
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 body { background: #fff; color: #171717; font-family: 'Inter', Arial, sans-serif; min-height: 100vh; -webkit-font-smoothing: antialiased; }
@@ -139,10 +142,11 @@ nav { position: sticky; top: 0; z-index: 100; background: rgba(255,255,255,0.85)
 .chat-summary.expanded .chat-summary-body { max-height: none; }
 .chat-divider { display: flex; align-items: center; gap: 12px; margin: 12px 0; font-size: 11px; color: #aaa; font-family: 'JetBrains Mono', monospace; }
 .chat-divider::before, .chat-divider::after { content: ''; flex: 1; border-top: 1px dashed #d0d0d0; }
-.chat-bubble { max-width: 80%; padding: 8px 14px; border-radius: 12px; font-size: 13px; line-height: 1.6; word-break: break-word; }
+.chat-bubble { max-width: 80%; padding: 8px 14px; border-radius: 12px; font-size: 13px; line-height: 1.6; word-break: break-word; white-space: pre-wrap; }
 .chat-bubble.user { align-self: flex-end; background: #0072f5; color: #fff; border-bottom-right-radius: 4px; }
 .chat-bubble.agent { align-self: flex-start; background: #f5f5f5; color: #171717; border-bottom-left-radius: 4px; }
 .chat-ts { font-size: 10px; color: #bbb; text-align: center; margin: 8px 0 2px; font-feature-settings: "tnum"; }
+.chat-access-row { display: flex; gap: 8px; padding: 8px 16px; box-shadow: rgba(0,0,0,0.06) 0px -1px 0px; background: #fffbeb; }
 .chat-input-row { display: flex; gap: 8px; padding: 12px 16px; box-shadow: rgba(0,0,0,0.08) 0px -1px 0px; background: #fff; }
 .chat-input-row textarea { flex: 1; border: none; background: #fafafa; box-shadow: rgba(0,0,0,0.08) 0px 0px 0px 1px inset; border-radius: 8px; padding: 10px 12px; font-size: 13px; font-family: 'Inter', Arial, sans-serif; resize: none; outline: none; min-height: 40px; max-height: 120px; line-height: 1.4; }
 .chat-input-row textarea:focus { box-shadow: 0 0 0 2px #0072f5; }
@@ -155,6 +159,31 @@ nav { position: sticky; top: 0; z-index: 100; background: rgba(255,255,255,0.85)
 .chat-conv-item + .chat-conv-item { box-shadow: rgba(0,0,0,0.06) 0px -1px 0px; }
 .chat-back { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; margin-bottom: 8px; font-size: 12px; color: #666; cursor: pointer; border-radius: 6px; background: none; border: none; font-family: 'Inter', Arial, sans-serif; }
 .chat-back:hover { color: #171717; background: #f5f5f5; }
+
+/* Auth / Login */
+.auth-btn { padding: 4px 12px; border-radius: 6px; font-size: 13px; font-weight: 500; color: #666; background: none; border: 1px solid rgba(0,0,0,0.1); cursor: pointer; font-family: 'Inter', Arial, sans-serif; transition: all 0.15s; }
+.auth-btn:hover { color: #171717; border-color: rgba(0,0,0,0.2); }
+.auth-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #555; }
+.auth-id { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #888; }
+.auth-owner { font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 4px; background: #f0fdf4; color: #16a34a; }
+.auth-logout { font-size: 12px; color: #aaa; cursor: pointer; margin-left: 2px; }
+.auth-logout:hover { color: #dc2626; }
+
+/* Login modal */
+.login-overlay { display: none; position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,0.3); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); align-items: center; justify-content: center; }
+.login-overlay.open { display: flex; }
+.login-modal { background: #fff; border-radius: 12px; box-shadow: 0 16px 48px rgba(0,0,0,0.16); padding: 28px 32px; width: 380px; max-width: 90vw; }
+.login-modal h3 { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+.login-modal p { font-size: 13px; color: #666; margin-bottom: 16px; }
+.login-modal input { width: 100%; padding: 8px 12px; border: 1px solid rgba(0,0,0,0.12); border-radius: 8px; font-size: 14px; font-family: 'JetBrains Mono', monospace; outline: none; transition: border-color 0.15s; }
+.login-modal input:focus { border-color: #0072f5; }
+.login-modal .login-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.login-modal .login-actions button { padding: 6px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; border: 1px solid rgba(0,0,0,0.1); font-family: 'Inter', Arial, sans-serif; }
+.login-modal .btn-cancel { background: #fff; color: #666; }
+.login-modal .btn-cancel:hover { background: #f5f5f5; }
+.login-modal .btn-login { background: #171717; color: #fff; border-color: #171717; }
+.login-modal .btn-login:hover { background: #333; }
+.login-error { font-size: 12px; color: #dc2626; margin-top: 8px; display: none; }
 
 /* Home iframe */
 .home-iframe { width: 100%; border: none; display: block; }
@@ -212,6 +241,8 @@ nav { position: sticky; top: 0; z-index: 100; background: rgba(255,255,255,0.85)
       <a href="/orders">Orders</a>
       <a href="/suggestions">Suggestions</a>
       <a href="/pk">PK Arena</a>
+      <span style="width:1px;height:16px;background:rgba(0,0,0,0.1);margin:0 6px"></span>
+      <span id="auth-area"></span>
     </div>
   </div>
 </nav>
@@ -287,6 +318,7 @@ function renderPage(a) {
   if (hasCustom) tabs.push({id:'home', label:'Home'});
   tabs.push({id:'profile', label:'Profile'});
   tabs.push({id:'chat', label:'Chat'});
+  tabs.push({id:'terminal', label:'Terminal'});
   tabs.push({id:'games', label:'Games'});
   tabs.push({id:'library', label:'Library'});
 
@@ -406,23 +438,7 @@ function renderPage(a) {
   }
 
   // Submit task
-  h += '<div class="section">';
-  h += '<div class="section-label">Submit Task</div>';
-  h += '<div class="card"><div class="form-card">';
-  h += '<div class="form-heading">Send a task to ' + esc(a.name) + '</div>';
-  if (a.avg_response_ms) h += '<div class="form-sub">Avg response: ' + spd(a.avg_response_ms) + '</div>';
-  if (off) h += '<div class="offline-warn">\u26A0\uFE0F This agent is currently offline.</div>';
-  if (!a.public) {
-    h += '<div class="field"><label>Access Key</label><input type="password" id="inp-key" placeholder="ak_access_..." autocomplete="off"></div>';
-  }
-  h += '<div class="field"><label>Task</label><textarea id="inp-task" placeholder="Describe what you want the agent to do..."></textarea></div>';
-  h += '<button id="btn-submit" class="btn-primary" onclick="submitTask()"' + (off?' disabled':'') + '>';
-  h += '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>';
-  h += 'Call this Agent</button>';
-  h += '<div class="elapsed" id="elapsed-wrap"><span class="spinner">\u25E0</span> <span id="elapsed">0s</span></div>';
-  h += '<div class="resp-area" id="resp"></div>';
-  h += '</div></div>';
-  h += '</div>';
+  // (Submit Task removed — use Chat tab instead)
 
   // Owner controls
   h += '<div class="owner-toggle" onclick="toggleOwner()">Owner Controls \u25BE</div>';
@@ -444,11 +460,26 @@ function renderPage(a) {
   h += '<div id="tab-chat" class="tab-panel">';
   h += '<div class="chat-wrap">';
   h += '<div class="chat-messages" id="chat-messages"><div class="empty-state">Loading chat...</div></div>';
+  if (!a.public) {
+    h += '<div class="chat-access-row" id="chat-access-row">';
+    h += '<input type="password" id="chat-access-key" placeholder="Access key required for this agent" autocomplete="off" style="flex:1;padding:6px 10px;border:1px solid rgba(0,0,0,0.1);border-radius:6px;font-size:12px;font-family:\'JetBrains Mono\',monospace;outline:none">';
+    h += '<button onclick="applyAccessKey()" style="padding:6px 12px;border:1px solid rgba(0,0,0,0.1);border-radius:6px;font-size:12px;font-weight:500;background:#fff;cursor:pointer;font-family:\'Inter\',sans-serif">Unlock</button>';
+    h += '</div>';
+  }
   h += '<div class="chat-input-row">';
-  h += '<textarea id="chat-input" placeholder="Send a message..." rows="1"' + (off ? ' disabled' : '') + '></textarea>';
-  h += '<button class="chat-send" id="chat-send" onclick="sendChat()"' + (off ? ' disabled' : '') + '>Send</button>';
+  h += '<textarea id="chat-input" placeholder="Send a message..." rows="1"' + (off || !a.public ? ' disabled' : '') + '></textarea>';
+  h += '<button class="chat-send" id="chat-send" onclick="sendChat()"' + (off || !a.public ? ' disabled' : '') + '>Send</button>';
   h += '</div>';
   h += '</div>';
+  h += '</div>';
+
+  // Terminal tab
+  h += '<div id="tab-terminal" class="tab-panel">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">';
+  h += '<span style="font-size:13px;color:#666;">Remote Terminal</span>';
+  h += '<button id="term-connect-btn" class="chat-send" onclick="toggleTerminal()" style="padding:6px 16px;">Connect</button>';
+  h += '</div>';
+  h += '<div id="terminal-container" style="width:100%;height:500px;background:#1a1a2e;border-radius:8px;overflow:hidden;"></div>';
   h += '</div>';
 
   // Games tab
@@ -486,52 +517,7 @@ function renderPage(a) {
   loadChat();
 }
 
-function submitTask() {
-  if (!cur) return;
-  var task = document.getElementById('inp-task').value.trim();
-  if (!task) return;
-  var btn = document.getElementById('btn-submit');
-  var ew = document.getElementById('elapsed-wrap');
-  var rsp = document.getElementById('resp');
-  btn.disabled = true;
-  rsp.className = 'resp-area on';
-  rsp.textContent = 'Placing order...';
-  ew.className = 'elapsed on';
-  var t0 = Date.now();
-  tmr = setInterval(function() {
-    var s = Math.floor((Date.now()-t0)/1000);
-    var m = Math.floor(s/60);
-    document.getElementById('elapsed').textContent = (m>0?m+'m ':'')+s%60+'s';
-  }, 1000);
-
-  var headers = {'Content-Type':'application/json'};
-  var keyEl = document.getElementById('inp-key');
-  if (keyEl && keyEl.value.trim()) headers['X-Access-Key'] = keyEl.value.trim();
-
-  fetch('/v1/agent/'+encodeURIComponent(cur.name)+'/orders', {
-    method:'POST', headers:headers,
-    body:JSON.stringify({task:task})
-  })
-  .then(function(r){if(!r.ok)return r.json().then(function(b){throw new Error(b.error||'Failed');});return r.json();})
-  .then(function(data){
-    var oid=data.order_id;
-    rsp.innerHTML='\u23F3 <a href="/order/'+esc(oid)+'" style="color:#0072f5">#'+esc(oid.substring(0,8))+'</a> Waiting for agent...';
-    orderPollTmr=setInterval(function(){
-      fetch('/v1/orders/'+oid).then(function(r){return r.json();}).then(function(o){
-        if(o.status==='completed'){done();rsp.className='resp-area on';rsp.innerHTML='<div style="color:#16a34a;margin-bottom:6px">\u2714 Delivered <a href="/order/'+esc(oid)+'" style="color:#aaa;font-size:0.75rem">[view]</a></div>'+esc(o.result_text||'');}
-        else if(o.status==='failed'){done();rsp.className='resp-area on err';rsp.innerHTML='\u2716 Could not deliver. <a href="/order/'+esc(oid)+'">[view]</a>';}
-        else if(o.status==='processing'){rsp.innerHTML='\u2699\uFE0F Working... <a href="/order/'+esc(oid)+'" style="color:#aaa;font-size:0.75rem">[track]</a>';}
-      }).catch(function(){});
-    },5000);
-  })
-  .catch(function(err){done();rsp.className='resp-area on err';rsp.textContent=err.message||'Error';});
-
-  function done(){if(tmr){clearInterval(tmr);tmr=null;}if(orderPollTmr){clearInterval(orderPollTmr);orderPollTmr=null;}ew.className='elapsed';btn.disabled=false;}
-}
-
-document.addEventListener('keydown', function(e) {
-  if ((e.metaKey||e.ctrlKey)&&e.key==='Enter'&&cur) {e.preventDefault();submitTask();}
-});
+// (submitTask removed — use Chat tab sendChat instead)
 
 window.addEventListener('message', function(e) {
   if (e.data && e.data.type === 'iframeHeight') {
@@ -658,14 +644,42 @@ function loadLibrary() {
 var chatConvId = null;
 var chatSending = false;
 
+function unlockChatUI() {
+  var row = document.getElementById('chat-access-row');
+  if (row) row.style.display = 'none';
+  var ci = document.getElementById('chat-input');
+  var cb = document.getElementById('chat-send');
+  if (ci && cur && cur.status !== 'offline') ci.disabled = false;
+  if (cb && cur && cur.status !== 'offline') cb.disabled = false;
+}
+
+function showAccessKeyRow() {
+  var row = document.getElementById('chat-access-row');
+  if (row) row.style.display = '';
+  var ci = document.getElementById('chat-input');
+  var cb = document.getElementById('chat-send');
+  if (ci) ci.disabled = true;
+  if (cb) cb.disabled = true;
+}
+
 function loadChat() {
   var sec = document.getElementById('chat-messages');
   if (!sec) return;
 
   // Load the current user's own conversation with this agent
-  fetch('/v1/agent/' + encodeURIComponent(AGENT_NAME) + '/chat/mine')
-  .then(function(r) { return r.ok ? r.json() : null; })
+  authFetch('/v1/agent/' + encodeURIComponent(AGENT_NAME) + '/chat/mine')
+  .then(function(r) {
+    if (r.status === 401 || r.status === 403) {
+      // Access denied — show access key input for private agents
+      showAccessKeyRow();
+      sec.innerHTML = '<div class="empty-state">This agent is private. Enter an access key to chat.</div>';
+      return null;
+    }
+    return r.ok ? r.json() : null;
+  })
   .then(function(data) {
+    if (data === null) return;
+    unlockChatUI();
     if (!data || (!data.rounds.length && !data.summary)) {
       sec.innerHTML = '<div class="empty-state">No conversation yet. Send a message to start.</div>'
         + '<div style="text-align:center;margin-top:8px"><button class="chat-back" onclick="loadAllConvs()">View all conversations</button></div>';
@@ -683,7 +697,7 @@ function loadAllConvs() {
   if (!sec) return;
   sec.innerHTML = '<div class="empty-state">Loading...</div>';
 
-  fetch('/v1/agent/' + encodeURIComponent(AGENT_NAME) + '/chat/history')
+  authFetch('/v1/agent/' + encodeURIComponent(AGENT_NAME) + '/chat/history')
   .then(function(r) { return r.ok ? r.json() : []; })
   .then(function(list) {
     if (!list || !list.length) {
@@ -715,7 +729,7 @@ function openConv(id) {
   chatConvId = id;
   var sec = document.getElementById('chat-messages');
   if (sec) sec.innerHTML = '<div class="empty-state">Loading...</div>';
-  fetch('/v1/agent/' + encodeURIComponent(AGENT_NAME) + '/chat/' + encodeURIComponent(id))
+  authFetch('/v1/agent/' + encodeURIComponent(AGENT_NAME) + '/chat/' + encodeURIComponent(id))
   .then(function(r) { return r.json(); })
   .then(function(data) { renderChat(data); })
   .catch(function() {
@@ -786,13 +800,9 @@ function sendChat() {
   sec.appendChild(ub);
   sec.scrollTop = sec.scrollHeight;
 
-  // Submit via orders (same as submit task)
-  var headers = { 'Content-Type': 'application/json' };
-  var keyEl = document.getElementById('inp-key');
-  if (keyEl && keyEl.value.trim()) headers['X-Access-Key'] = keyEl.value.trim();
-
-  fetch('/v1/agent/' + encodeURIComponent(cur.name) + '/orders', {
-    method: 'POST', headers: headers,
+  // Submit via orders
+  authFetch('/v1/agent/' + encodeURIComponent(cur.name) + '/orders', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ task: msg })
   })
   .then(function(r) { if (!r.ok) return r.json().then(function(b) { throw new Error(b.error || 'Failed'); }); return r.json(); })
@@ -825,11 +835,20 @@ function sendChat() {
   })
   .catch(function(err) {
     chatDone();
-    var eb = document.createElement('div');
-    eb.className = 'chat-bubble agent';
-    eb.textContent = 'Error: ' + (err.message || 'Unknown');
-    eb.style.color = '#dc2626';
-    sec.appendChild(eb);
+    // Remove the user bubble we optimistically added
+    if (ub.parentNode) ub.parentNode.removeChild(ub);
+    inp.value = msg; // restore the message
+    var errMsg = err.message || 'Unknown';
+    if (errMsg.indexOf('access key') !== -1 || errMsg.indexOf('private') !== -1) {
+      showAccessKeyRow();
+      sec.innerHTML = '<div class="empty-state">This agent is private. Enter an access key to chat.</div>';
+    } else {
+      var eb = document.createElement('div');
+      eb.className = 'chat-bubble agent';
+      eb.textContent = 'Error: ' + errMsg;
+      eb.style.color = '#dc2626';
+      sec.appendChild(eb);
+    }
   });
 
   function chatDone() {
@@ -847,6 +866,110 @@ document.addEventListener('keydown', function(e) {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Terminal (xterm.js + WebSocket)
+// ---------------------------------------------------------------------------
+
+var termWs = null;
+var term = null;
+var termFitAddon = null;
+var termResizeObserver = null;
+
+function toggleTerminal() {
+  if (termWs) { disconnectTerminal(); return; }
+  connectTerminal();
+}
+
+function connectTerminal() {
+  var token = getToken();
+  if (!token) {
+    alert('Login required to use the terminal.');
+    return;
+  }
+  var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  var url = proto + '//' + location.host + '/v1/agent/' + encodeURIComponent(AGENT_NAME) + '/terminal?token=' + encodeURIComponent(token);
+
+  var container = document.getElementById('terminal-container');
+  container.innerHTML = '';
+
+  term = new Terminal({
+    cursorBlink: true,
+    fontSize: 14,
+    fontFamily: "'JetBrains Mono', monospace",
+    theme: { background: '#1a1a2e', foreground: '#e0e0e0', cursor: '#0072f5' },
+  });
+  termFitAddon = new FitAddon.FitAddon();
+  term.loadAddon(termFitAddon);
+  term.open(container);
+  termFitAddon.fit();
+
+  var btn = document.getElementById('term-connect-btn');
+  btn.textContent = 'Connecting...';
+  btn.disabled = true;
+
+  termWs = new WebSocket(url);
+
+  termWs.onopen = function() {
+    // Send initial size
+    termWs.send(JSON.stringify({ cols: term.cols, rows: term.rows }));
+    btn.textContent = 'Disconnect';
+    btn.disabled = false;
+    term.write('\x1b[33mConnected to remote terminal.\x1b[0m\r\n');
+  };
+
+  termWs.onmessage = function(e) {
+    try {
+      var msg = JSON.parse(e.data);
+      if (msg.type === 'terminal_data' && msg.body) term.write(msg.body);
+      if (msg.type === 'terminal_exit') {
+        term.write('\r\n\x1b[31mTerminal session ended.\x1b[0m\r\n');
+        disconnectTerminal();
+      }
+    } catch(ex) {}
+  };
+
+  termWs.onerror = function() {
+    term.write('\r\n\x1b[31mWebSocket error.\x1b[0m\r\n');
+  };
+
+  termWs.onclose = function() {
+    if (btn.textContent === 'Connecting...') {
+      btn.textContent = 'Connect';
+      btn.disabled = false;
+    }
+    if (term && termWs) {
+      term.write('\r\n\x1b[31mDisconnected.\x1b[0m\r\n');
+    }
+    termWs = null;
+  };
+
+  // User input → PTY
+  term.onData(function(data) {
+    if (termWs && termWs.readyState === 1) {
+      termWs.send(JSON.stringify({ type: 'terminal_data', body: data }));
+    }
+  });
+
+  // Resize tracking
+  termResizeObserver = new ResizeObserver(function() {
+    if (termFitAddon) {
+      termFitAddon.fit();
+      if (termWs && termWs.readyState === 1) {
+        termWs.send(JSON.stringify({ type: 'terminal_resize', cols: term.cols, rows: term.rows }));
+      }
+    }
+  });
+  termResizeObserver.observe(container);
+}
+
+function disconnectTerminal() {
+  if (termResizeObserver) { termResizeObserver.disconnect(); termResizeObserver = null; }
+  if (termWs) { try { termWs.close(); } catch(e) {} termWs = null; }
+  if (term) { term.dispose(); term = null; termFitAddon = null; }
+  var btn = document.getElementById('term-connect-btn');
+  if (btn) { btn.textContent = 'Connect'; btn.disabled = false; }
+}
+
 function load() {
   fetch('/v1/agents')
   .then(function(r){return r.json();})
@@ -861,6 +984,157 @@ function load() {
 }
 
 load();
+</script>
+
+<div class="login-overlay" id="login-overlay" onclick="if(event.target===this)closeLogin()">
+  <div class="login-modal">
+    <h3>Login</h3>
+    <p>Enter your secret key to identify yourself.</p>
+    <input type="password" id="login-key" placeholder="ak_secret_..." autocomplete="off">
+    <div class="login-error" id="login-error"></div>
+    <div class="login-actions">
+      <button class="btn-cancel" onclick="closeLogin()">Cancel</button>
+      <button class="btn-login" id="login-submit" onclick="doLogin()">Login</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// --- Auth state ---
+var authState = null; // { role, id, account_id?, agents? }
+
+function getToken() {
+  var t = localStorage.getItem('akemon_token');
+  if (!t) {
+    t = 'anon_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
+    localStorage.setItem('akemon_token', t);
+  }
+  return t;
+}
+function setToken(t) { localStorage.setItem('akemon_token', t); }
+function clearToken() { localStorage.removeItem('akemon_token'); }
+
+function authHeaders(extra) {
+  var h = extra || {};
+  h['Authorization'] = 'Bearer ' + getToken();
+  return h;
+}
+
+function authFetch(url, opts) {
+  opts = opts || {};
+  opts.headers = authHeaders(opts.headers || {});
+  return fetch(url, opts);
+}
+
+function renderAuthArea() {
+  var el = document.getElementById('auth-area');
+  if (!el) return;
+  if (!authState || authState.role === 'anonymous') {
+    el.innerHTML = '<button class="auth-btn" onclick="openLogin()">Login</button>';
+    return;
+  }
+  var h = '<span class="auth-badge">';
+  if (authState.role === 'owner') h += '<span class="auth-owner">Owner</span>';
+  h += '<span class="auth-id">' + esc(authState.id) + '</span>';
+  h += '<span class="auth-logout" onclick="doLogout()" title="Logout">&times;</span>';
+  h += '</span>';
+  el.innerHTML = h;
+}
+
+function applyAccessKey() {
+  var inp = document.getElementById('chat-access-key');
+  if (!inp) return;
+  var key = inp.value.trim();
+  if (!key) return;
+  // Use the access key as the auth token
+  setToken(key);
+  // Re-check auth to update the top-right badge
+  checkAuth();
+  // Enable chat input
+  var ci = document.getElementById('chat-input');
+  var cb = document.getElementById('chat-send');
+  if (ci) ci.disabled = false;
+  if (cb) cb.disabled = false;
+  // Hide access key row
+  var row = document.getElementById('chat-access-row');
+  if (row) row.style.display = 'none';
+  // Reload chat with new token
+  loadChat();
+}
+
+function checkAuth() {
+  authFetch('/v1/auth/check')
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    authState = d;
+    renderAuthArea();
+  })
+  .catch(function() {
+    authState = { role: 'anonymous', id: '' };
+    renderAuthArea();
+  });
+}
+
+function openLogin() {
+  document.getElementById('login-overlay').classList.add('open');
+  document.getElementById('login-key').value = '';
+  document.getElementById('login-error').style.display = 'none';
+  setTimeout(function() { document.getElementById('login-key').focus(); }, 100);
+}
+
+function closeLogin() {
+  document.getElementById('login-overlay').classList.remove('open');
+}
+
+function doLogin() {
+  var key = document.getElementById('login-key').value.trim();
+  if (!key) return;
+  var errEl = document.getElementById('login-error');
+  var btn = document.getElementById('login-submit');
+  btn.disabled = true;
+  btn.textContent = 'Checking...';
+  errEl.style.display = 'none';
+
+  fetch('/v1/auth/check', { headers: { 'Authorization': 'Bearer ' + key } })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    btn.disabled = false;
+    btn.textContent = 'Login';
+    if (d.role === 'anonymous') {
+      errEl.textContent = 'Invalid key';
+      errEl.style.display = 'block';
+      return;
+    }
+    setToken(key);
+    authState = d;
+    renderAuthArea();
+    closeLogin();
+    // Reload chat tab if visible
+    if (document.querySelector('.tab-btn.active[data-tab="chat"]')) loadChat();
+  })
+  .catch(function() {
+    btn.disabled = false;
+    btn.textContent = 'Login';
+    errEl.textContent = 'Connection error';
+    errEl.style.display = 'block';
+  });
+}
+
+function doLogout() {
+  clearToken();
+  authState = null;
+  checkAuth();
+  // Reload chat tab if visible
+  if (document.querySelector('.tab-btn.active[data-tab="chat"]')) loadChat();
+}
+
+// Enter key on login input
+document.getElementById('login-key').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') doLogin();
+});
+
+// Init auth on page load
+checkAuth();
 </script>
 </body>
 </html>
