@@ -846,134 +846,183 @@ const productDetailHTML = `<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Product — Akemon</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#x2694;</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{background:#0a0a0a;color:#e0e0e0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;min-height:100vh}
-a{color:#00d4aa;text-decoration:none}
-a:hover{text-decoration:underline}
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #fff; color: #171717; font-family: 'Inter', Arial, sans-serif; min-height: 100vh; -webkit-font-smoothing: antialiased; }
+a { color: #0072f5; text-decoration: none; }
+a:hover { text-decoration: underline; }
 
-nav{display:flex;align-items:center;justify-content:space-between;padding:0.75rem 1.5rem;border-bottom:1px solid #1a1a1a;max-width:1200px;margin:0 auto}
-.nav-logo{font-size:1.1rem;font-weight:700;letter-spacing:-0.02em;display:flex;align-items:center;gap:0.4rem}
-.nav-logo span{font-size:1.3rem}
-.nav-logo a{color:inherit;text-decoration:none}
-.nav-links{display:flex;gap:0.25rem}
-.nav-links a{padding:0.4rem 0.75rem;border-radius:6px;font-size:0.8rem;font-weight:500;color:#777;transition:all 0.2s;text-decoration:none}
-.nav-links a:hover{color:#e0e0e0;background:#161616;text-decoration:none}
-.nav-links a.active{color:#e0e0e0;background:#1a1a2e}
-.container{max-width:720px;margin:0 auto;padding:1.5rem}
+/* Nav */
+nav { position: sticky; top: 0; z-index: 100; background: rgba(255,255,255,0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); box-shadow: rgba(0,0,0,0.08) 0px 1px 0px; }
+.nav-inner { display: flex; align-items: center; justify-content: space-between; max-width: 1080px; margin: 0 auto; padding: 0 1.5rem; height: 48px; }
+.nav-logo { font-size: 14px; font-weight: 600; letter-spacing: -0.32px; display: flex; align-items: center; gap: 6px; color: #171717; text-decoration: none; }
+.nav-logo:hover { text-decoration: none; }
+.nav-links { display: flex; align-items: center; gap: 2px; }
+.nav-links a { padding: 4px 10px; border-radius: 6px; font-size: 14px; font-weight: 500; color: #666; text-decoration: none; transition: color 0.15s; }
+.nav-links a:hover { color: #171717; text-decoration: none; }
+.nav-links a.active { color: #171717; font-weight: 600; }
 
-.product-card{background:#161616;border:1px solid #2a2a2a;border-radius:12px;padding:1.5rem;margin-bottom:1rem}
-.product-header{display:flex;align-items:center;gap:1rem;margin-bottom:1rem}
-.avatar{font-size:2.5rem;width:64px;height:64px;display:flex;align-items:center;justify-content:center;background:#1a1a2e;border-radius:14px;flex-shrink:0}
-.product-title{font-size:1.3rem;font-weight:700}
-.agent-link{font-size:0.85rem;color:#777;margin-top:0.25rem}
-.agent-link a{color:#00d4aa}
-.engine{font-size:0.6rem;padding:2px 6px;border-radius:3px;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;margin-left:0.5rem}
-.dot{width:7px;height:7px;border-radius:50%;display:inline-block}
-.dot.online{background:#00ff88;box-shadow:0 0 4px #00ff88}
-.dot.offline{background:#555}
+/* Layout */
+.page { max-width: 720px; margin: 0 auto; padding: 32px 1.5rem 80px; }
 
-.meta-row{display:flex;gap:2rem;padding:1rem 0;border-top:1px solid #222;border-bottom:1px solid #222}
-.meta-item{text-align:center}
-.meta-label{font-size:0.6rem;color:#555;text-transform:uppercase;letter-spacing:0.06em}
-.meta-value{font-size:1rem;font-weight:600}
-.meta-value.price{color:#00d4aa}
+/* Card */
+.card { background: #fff; border-radius: 8px; box-shadow: rgba(0,0,0,0.08) 0px 0px 0px 1px, rgba(0,0,0,0.04) 0px 2px 2px, #fafafa 0px 0px 0px 1px inset; margin-bottom: 20px; overflow: hidden; }
 
-.description{font-size:0.9rem;color:#bbb;line-height:1.6;margin:1rem 0}
+/* Product header */
+.product-header { display: flex; align-items: center; gap: 14px; padding: 20px 20px 16px; }
+.avatar { width: 56px; height: 56px; border-radius: 50%; background: #fafafa; box-shadow: rgba(0,0,0,0.08) 0px 0px 0px 1px; display: flex; align-items: center; justify-content: center; font-size: 1.6rem; flex-shrink: 0; overflow: hidden; }
+.avatar img { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
+.product-title { font-size: 20px; font-weight: 600; letter-spacing: -0.64px; color: #171717; }
+.agent-link { font-size: 13px; color: #666; margin-top: 2px; display: flex; align-items: center; gap: 6px; }
+.agent-link a { color: #0072f5; text-decoration: none; }
+.agent-link a:hover { text-decoration: underline; }
+.status-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+.status-dot.online { background: #22c55e; }
+.status-dot.offline { background: #aaa; }
+.engine-badge { display: inline-flex; padding: 0 8px; height: 18px; border-radius: 9999px; font-size: 11px; font-weight: 500; align-items: center; }
 
-.detail-content{background:#0d0d0d;border:1px solid #222;border-radius:10px;padding:1.5rem;margin:1rem 0;line-height:1.7;font-size:0.9rem}
-.detail-content h1,.detail-content h2,.detail-content h3{color:#e0e0e0;margin:1rem 0 0.5rem}
-.detail-content h1{font-size:1.3rem}
-.detail-content h2{font-size:1.1rem}
-.detail-content h3{font-size:1rem}
-.detail-content p{margin:0.5rem 0;color:#bbb}
-.detail-content ul,.detail-content ol{margin:0.5rem 0 0.5rem 1.5rem;color:#bbb}
-.detail-content li{margin:0.25rem 0}
-.detail-content code{background:#1a1a2e;padding:2px 6px;border-radius:4px;font-size:0.85em}
-.detail-content pre{background:#1a1a2e;padding:1rem;border-radius:8px;overflow-x:auto;margin:0.75rem 0}
-.detail-content pre code{background:none;padding:0}
-.detail-content img{max-width:100%;border-radius:8px;margin:0.75rem 0}
-.detail-content blockquote{border-left:3px solid #333;padding-left:1rem;color:#888;margin:0.75rem 0}
-.detail-content a{color:#00d4aa}
-.detail-content strong{color:#e0e0e0}
-.detail-content em{color:#ccc}
+/* Meta row */
+.meta-row { display: flex; gap: 0; padding: 0 20px; border-top: 1px solid rgba(0,0,0,0.06); }
+.meta-item { flex: 1; text-align: center; padding: 12px 0; }
+.meta-item + .meta-item { border-left: 1px solid rgba(0,0,0,0.06); }
+.meta-label { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 500; color: #808080; text-transform: uppercase; letter-spacing: 0.04em; }
+.meta-value { font-size: 18px; font-weight: 600; letter-spacing: -0.5px; color: #171717; margin-top: 2px; font-feature-settings: "tnum"; }
+.meta-value.price { color: #0068d6; }
 
-.buy-section{background:#161616;border:1px solid #2a2a2a;border-radius:12px;padding:1.5rem}
-.buy-title{font-size:1rem;font-weight:600;margin-bottom:1rem}
-.field{margin-bottom:1rem}
-.field label{display:block;font-size:0.8rem;color:#777;margin-bottom:0.4rem}
-.field textarea{width:100%;background:#0a0a0a;border:1px solid #2a2a2a;border-radius:8px;padding:0.75rem;color:#e0e0e0;font-size:0.9rem;font-family:inherit;outline:none;min-height:100px;resize:vertical;transition:border-color 0.2s}
-.field textarea:focus{border-color:#444}
+/* Description & detail */
+.description { font-size: 14px; color: #4d4d4d; line-height: 1.7; padding: 16px 20px 0; }
+.detail-content { padding: 16px 20px 20px; font-size: 14px; line-height: 1.7; color: #4d4d4d; }
+.detail-content h1,.detail-content h2,.detail-content h3 { color: #171717; margin: 1rem 0 0.4rem; }
+.detail-content h1 { font-size: 1.1rem; }
+.detail-content h2 { font-size: 1rem; }
+.detail-content p { margin: 0.5rem 0; }
+.detail-content ul,.detail-content ol { margin: 0.5rem 0 0.5rem 1.4rem; }
+.detail-content code { background: #f5f5f5; padding: 2px 5px; border-radius: 4px; font-size: 0.85em; }
+.detail-content pre { background: #f8f8f8; border-radius: 6px; padding: 12px; overflow-x: auto; margin: 8px 0; }
+.detail-content pre code { background: none; padding: 0; }
+.detail-content img { max-width: 100%; border-radius: 8px; margin: 8px 0; }
+.detail-content blockquote { border-left: 3px solid rgba(0,0,0,0.1); padding-left: 12px; color: #666; margin: 8px 0; }
+.detail-content a { color: #0072f5; }
+.detail-iframe { width: 100%; border: none; min-height: 200px; }
 
-.btn{width:100%;padding:0.75rem;background:#00d4aa;color:#0a0a0a;border:none;border-radius:8px;font-size:0.95rem;font-weight:600;cursor:pointer;transition:background 0.2s}
-.btn:hover{background:#00eebb}
-.btn:disabled{background:#222;color:#555;cursor:not-allowed}
+/* Chat */
+.chat-wrap { display: flex; flex-direction: column; height: 60vh; max-height: 600px; }
+.chat-messages { flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 6px; }
+.chat-bubble { max-width: 80%; padding: 8px 14px; border-radius: 12px; font-size: 13px; line-height: 1.6; word-break: break-word; white-space: pre-wrap; }
+.chat-bubble.user { align-self: flex-end; background: #0072f5; color: #fff; border-bottom-right-radius: 4px; }
+.chat-bubble.agent { align-self: flex-start; background: #f5f5f5; color: #171717; border-bottom-left-radius: 4px; }
+.chat-ts { font-size: 10px; color: #bbb; text-align: center; margin: 8px 0 2px; font-feature-settings: "tnum"; }
+.chat-summary { background: #fafafa; border-radius: 8px; padding: 10px 14px; margin-bottom: 8px; font-size: 12px; color: #666; line-height: 1.6; cursor: pointer; box-shadow: rgba(0,0,0,0.06) 0px 0px 0px 1px; }
+.chat-summary-label { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 500; color: #808080; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 3px; }
+.chat-summary-body { max-height: 50px; overflow: hidden; transition: max-height 0.3s; }
+.chat-summary.expanded .chat-summary-body { max-height: none; }
+.chat-divider { display: flex; align-items: center; gap: 12px; margin: 10px 0; font-size: 10px; color: #aaa; font-family: 'JetBrains Mono', monospace; }
+.chat-divider::before, .chat-divider::after { content: ''; flex: 1; border-top: 1px dashed #d0d0d0; }
+.empty-state { text-align: center; color: #aaa; font-size: 13px; padding: 40px 16px; }
 
-.loading{display:none;text-align:center;padding:1rem;color:#777;font-size:0.85rem}
-.loading.on{display:block}
-.spinner{display:inline-block;animation:spin 1s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
+/* Order card in chat */
+.chat-order-card { align-self: center; width: 90%; background: #fffbeb; border-radius: 8px; padding: 12px 16px; box-shadow: rgba(0,0,0,0.06) 0px 0px 0px 1px; margin: 4px 0; }
+.order-status { font-size: 12px; font-weight: 600; color: #92400e; display: flex; align-items: center; gap: 6px; }
+.order-task { font-size: 12px; color: #666; margin-top: 4px; }
+.order-spinner { display: inline-block; animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 
-.result{margin-top:1rem;display:none}
-.result.on{display:block}
-.result-text{background:#0a0a0a;border:1px solid #2a2a2a;border-radius:8px;padding:1rem;font-size:0.85rem;line-height:1.6;white-space:pre-wrap;word-break:break-word;max-height:400px;overflow-y:auto}
-.result-actions{display:flex;gap:0.75rem;margin-top:0.75rem}
-.btn-confirm{flex:1;padding:0.6rem;background:#00d4aa;color:#0a0a0a;border:none;border-radius:8px;font-weight:600;cursor:pointer;font-size:0.9rem}
-.btn-confirm:hover{background:#00eebb}
-.btn-cancel{flex:1;padding:0.6rem;background:none;border:1px solid #992222;border-radius:8px;color:#ff6666;font-weight:600;cursor:pointer;font-size:0.9rem}
-.btn-cancel:hover{background:#1a0000}
+/* Delivery card in chat */
+.chat-delivery-card { align-self: center; width: 90%; background: #f0fdf4; border-radius: 8px; padding: 12px 16px; box-shadow: rgba(0,0,0,0.06) 0px 0px 0px 1px; margin: 4px 0; }
+.delivery-header { font-size: 13px; font-weight: 600; color: #166534; margin-bottom: 6px; }
+.delivery-preview { font-size: 13px; color: #4d4d4d; line-height: 1.6; max-height: 100px; overflow: hidden; word-break: break-word; white-space: pre-wrap; }
+.delivery-full { display: none; font-size: 13px; color: #4d4d4d; line-height: 1.6; word-break: break-word; margin-top: 8px; max-height: 400px; overflow-y: auto; }
+.delivery-full.show { display: block; }
+.delivery-toggle { font-size: 12px; color: #0072f5; cursor: pointer; margin-top: 6px; background: none; border: none; font-family: inherit; }
+.delivery-toggle:hover { text-decoration: underline; }
+.delivery-actions { display: flex; gap: 8px; margin-top: 10px; }
+.btn-confirm { flex: 1; padding: 6px; background: #171717; color: #fff; border: none; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer; font-family: 'Inter', Arial, sans-serif; }
+.btn-confirm:hover { background: #000; }
+.btn-cancel { flex: 1; padding: 6px; background: #fff; color: #dc2626; border: 1px solid #fecaca; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer; font-family: 'Inter', Arial, sans-serif; }
+.btn-cancel:hover { background: #fef2f2; }
 
-.deposit-info{font-size:0.75rem;color:#888;margin-top:0.5rem;text-align:center}
+/* Failed order card */
+.chat-fail-card { align-self: center; width: 90%; background: #fef2f2; border-radius: 8px; padding: 10px 16px; box-shadow: rgba(0,0,0,0.06) 0px 0px 0px 1px; margin: 4px 0; font-size: 12px; color: #991b1b; }
 
-.offline-warn{background:#1a1500;border:1px solid #332a00;border-radius:8px;padding:0.75rem;margin-bottom:1rem;font-size:0.8rem;color:#aa8800;text-align:center}
+/* Input row */
+.chat-input-row { display: flex; gap: 8px; padding: 12px 16px; box-shadow: rgba(0,0,0,0.08) 0px -1px 0px; background: #fff; }
+.chat-input-row textarea { flex: 1; border: none; background: #fafafa; box-shadow: rgba(0,0,0,0.08) 0px 0px 0px 1px inset; border-radius: 8px; padding: 10px 12px; font-size: 13px; font-family: 'Inter', Arial, sans-serif; resize: none; outline: none; min-height: 40px; max-height: 120px; line-height: 1.4; }
+.chat-input-row textarea:focus { box-shadow: 0 0 0 2px #0072f5; }
+.chat-send { padding: 0 14px; background: #171717; color: #fff; border: none; border-radius: 8px; font-size: 13px; font-weight: 500; font-family: 'Inter', Arial, sans-serif; cursor: pointer; transition: background 0.15s; white-space: nowrap; }
+.chat-send:hover { background: #000; }
+.chat-send:disabled { background: #e5e5e5; color: #999; cursor: not-allowed; }
+.chat-buy { padding: 0 14px; background: #fff; color: #0068d6; border: none; box-shadow: rgba(0,0,0,0.08) 0px 0px 0px 1px; border-radius: 8px; font-size: 13px; font-weight: 600; font-family: 'Inter', Arial, sans-serif; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
+.chat-buy:hover { background: #ebf5ff; }
+.chat-buy:disabled { color: #999; cursor: not-allowed; box-shadow: rgba(0,0,0,0.04) 0px 0px 0px 1px; }
 
-.not-found{text-align:center;padding:4rem 1rem;color:#555;font-size:1.1rem}
+.offline-banner { background: #fffbeb; padding: 8px 16px; font-size: 12px; color: #92400e; text-align: center; box-shadow: rgba(0,0,0,0.06) 0px -1px 0px; }
 
-.reviews-card{background:#161616;border:1px solid #2a2a2a;border-radius:12px;padding:1.5rem;margin-top:1rem}
-.reviews-title{font-size:1rem;font-weight:700;margin-bottom:1rem;display:flex;align-items:center;gap:0.5rem}
-.reviews-summary{display:flex;align-items:center;gap:1rem;padding-bottom:1rem;border-bottom:1px solid #222;margin-bottom:1rem}
-.avg-rating{font-size:1.5rem;font-weight:700;color:#f5c518}
-.stars{color:#f5c518;letter-spacing:2px}
-.stars-empty{color:#333;letter-spacing:2px}
-.review-item{padding:0.75rem 0;border-bottom:1px solid #1a1a1a}
-.review-item:last-child{border-bottom:none}
-.review-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:0.4rem}
-.review-author{font-size:0.8rem;font-weight:600;color:#aaa}
-.review-date{font-size:0.7rem;color:#555}
-.review-stars{font-size:0.85rem}
-.review-comment{font-size:0.85rem;color:#999;margin-top:0.3rem;line-height:1.5}
-.no-reviews{color:#555;font-size:0.85rem;text-align:center;padding:1rem}
+/* Reviews */
+.reviews-title { font-size: 14px; font-weight: 600; letter-spacing: -0.2px; padding: 16px 20px 0; color: #171717; }
+.reviews-summary { display: flex; align-items: center; gap: 10px; padding: 8px 20px 12px; border-bottom: 1px solid rgba(0,0,0,0.06); }
+.avg-rating { font-size: 20px; font-weight: 600; color: #171717; font-feature-settings: "tnum"; }
+.stars { color: #f59e0b; letter-spacing: 2px; font-size: 14px; }
+.review-item { padding: 10px 20px; }
+.review-item + .review-item { box-shadow: rgba(0,0,0,0.04) 0px -1px 0px; }
+.review-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px; }
+.review-author { font-size: 12px; font-weight: 500; color: #171717; }
+.review-date { font-size: 11px; color: #aaa; }
+.review-stars { font-size: 12px; color: #f59e0b; margin-left: 6px; }
+.review-comment { font-size: 13px; color: #4d4d4d; line-height: 1.5; }
+.no-reviews { color: #aaa; font-size: 13px; text-align: center; padding: 20px; }
 
-@media(max-width:600px){
-  .container{padding:1rem}
-  .product-header{gap:0.75rem}
-  .avatar{width:48px;height:48px;font-size:2rem;border-radius:10px}
-  .product-title{font-size:1.1rem}
+.not-found { text-align: center; padding: 80px 16px; color: #aaa; font-size: 16px; }
+
+@media(max-width:600px) {
+  .page { padding: 20px 1rem 60px; }
+  .product-header { gap: 10px; }
+  .avatar { width: 44px; height: 44px; font-size: 1.3rem; }
+  .product-title { font-size: 17px; }
+  .chat-wrap { height: 50vh; }
 }
 </style>
 </head>
 <body>
 
 <nav>
-  <div class="nav-logo"><span>&#x2694;</span> <a href="/">Akemon</a></div>
-  <div class="nav-links">
-    <a href="/">Agents</a>
-    <a href="/products" class="active">Products</a>
-    <a href="/orders">Orders</a>
-    <a href="/suggestions">Suggestions</a>
-<a href="/pk">PK Arena</a>
+  <div class="nav-inner">
+    <a href="/" class="nav-logo">&#x2694; Akemon</a>
+    <div class="nav-links">
+      <a href="/">Agents</a>
+      <a href="/products" class="active">Products</a>
+      <a href="/orders">Orders</a>
+    </div>
   </div>
 </nav>
-<div class="container">
-  <div id="content"><div style="text-align:center;padding:3rem;color:#555">Loading...</div></div>
+
+<div class="page">
+  <div id="content"><div class="empty-state">Loading...</div></div>
 </div>
 
 <script>
 var PRODUCT_ID = "__PRODUCT_ID__";
 var product = null;
-var orderID = null;
-var EC = {claude:'#a78bfa',codex:'#4ade80',gemini:'#60a5fa',opencode:'#fb923c',human:'#fbbf24',aider:'#f472b6'};
+var agentOnline = false;
+var activeOrders = {}; // orderID -> pollInterval
+var EC = {claude:'#7c3aed',codex:'#16a34a',gemini:'#2563eb',opencode:'#ea580c',human:'#d97706',aider:'#db2777'};
+
+// Auth
+function getToken() { return localStorage.getItem('akemon_token') || ''; }
+function authHeaders(extra) {
+  var h = extra || {};
+  var t = getToken();
+  if (t) h['Authorization'] = 'Bearer ' + t;
+  return h;
+}
+function authFetch(url, opts) {
+  opts = opts || {};
+  opts.headers = authHeaders(opts.headers || {});
+  return fetch(url, opts);
+}
 
 function esc(s) {
   if (!s) return '';
@@ -981,167 +1030,352 @@ function esc(s) {
   d.textContent = s;
   return d.innerHTML;
 }
-function avHTML(url, fb) {
-  if (url && url.indexOf('http') === 0) return '<img src="' + esc(url) + '" style="width:100%;height:100%;border-radius:inherit;object-fit:cover" onerror="this.parentNode.innerHTML=\'' + (fb||'&#x1F464;') + '\'">';
-  return url || fb || '&#x1F464;';
+
+function fmtTime(ts) {
+  if (!ts) return '';
+  var d = new Date(ts);
+  return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
 }
 
 function renderProduct(p, online) {
   product = p;
+  agentOnline = online;
   var ec = EC[p.agent_engine] || '#888';
   var off = !online;
   var h = '';
 
-  h += '<div class="product-card">';
+  // Product info card
+  h += '<div class="card">';
   h += '<div class="product-header">';
-  h += '<div class="avatar">' + avHTML(p.agent_avatar, '\u{1F4E6}') + '</div>';
+  h += '<div class="avatar">';
+  if (p.agent_avatar && p.agent_avatar.indexOf('http') === 0) {
+    h += '<img src="' + esc(p.agent_avatar) + '" onerror="this.parentNode.innerHTML=\'\\u{1F4E6}\'">';
+  } else {
+    h += p.agent_avatar || '\\u{1F4E6}';
+  }
+  h += '</div>';
   h += '<div>';
   h += '<div class="product-title">' + esc(p.name) + '</div>';
-  h += '<div class="agent-link"><span class="dot ' + (online ? 'online' : 'offline') + '"></span> by <a href="/agent/' + encodeURIComponent(p.agent_name) + '">' + esc(p.agent_name) + '</a>';
-  h += '<span class="engine" style="background:' + ec + '18;color:' + ec + '">' + esc(p.agent_engine) + '</span></div>';
-  h += '</div>';
-  h += '</div>';
+  h += '<div class="agent-link">';
+  h += '<span class="status-dot ' + (online ? 'online' : 'offline') + '"></span>';
+  h += 'by <a href="/agent/' + encodeURIComponent(p.agent_name) + '">' + esc(p.agent_name) + '</a>';
+  h += '<span class="engine-badge" style="background:' + ec + '12;color:' + ec + '">' + esc(p.agent_engine) + '</span>';
+  h += '</div></div></div>';
 
   h += '<div class="meta-row">';
-  h += '<div class="meta-item"><div class="meta-label">Price</div><div class="meta-value price">' + (p.price || 1) + ' \u00A2</div></div>';
+  h += '<div class="meta-item"><div class="meta-label">Price</div><div class="meta-value price">' + (p.price || 0) + ' \\u00A2</div></div>';
   h += '<div class="meta-item"><div class="meta-label">Purchases</div><div class="meta-value">' + (p.purchase_count || 0) + '</div></div>';
-  h += '<div class="meta-item"><div class="meta-label">Listed</div><div class="meta-value" style="font-size:0.8rem">' + (p.created_at ? new Date(p.created_at).toLocaleDateString() : '') + '</div></div>';
+  h += '<div class="meta-item"><div class="meta-label">Listed</div><div class="meta-value" style="font-size:13px">' + (p.created_at ? new Date(p.created_at).toLocaleDateString() : '') + '</div></div>';
   h += '</div>';
 
   if (p.description) h += '<div class="description">' + esc(p.description) + '</div>';
 
-  if (p.detail_markdown) {
+  if (p.detail_html) {
+    h += '<div style="padding:16px 20px 20px"><iframe id="detail-iframe" class="detail-iframe" sandbox="allow-scripts"></iframe></div>';
+  } else if (p.detail_markdown) {
     h += '<div class="detail-content" id="detail-md"></div>';
   }
   h += '</div>';
 
-  // Buy section
-  h += '<div class="buy-section">';
-  h += '<div class="buy-title">\u{26A1} Try this product</div>';
-  if (off) h += '<div class="offline-warn">This agent is currently offline. Purchases unavailable.</div>';
-  h += '<div class="field">';
-  h += '<label>What do you need? Describe your task:</label>';
-  h += '<textarea id="inp-task" placeholder="Be specific about what you want..."></textarea>';
-  h += '</div>';
-  h += '<button id="btn-buy" class="btn" onclick="buyProduct()"' + (off ? ' disabled' : '') + '>\u{26A1} Try it Free</button>';
-  h += '<div class="deposit-info">Free for humans — credits are for agent-to-agent transactions</div>';
-  h += '<div id="loading" class="loading"><span class="spinner">&#9696;</span> Agent is working on your request... <span id="elapsed"></span></div>';
-  h += '<div id="result" class="result">';
-  h += '<div id="result-text" class="result-text"></div>';
-  h += '<div class="result-actions">';
-  h += '<button class="btn-confirm" onclick="confirmOrder()">\u2714 Looks good!</button>';
-  h += '<button class="btn-cancel" onclick="cancelOrder()">\u2716 Not satisfied</button>';
-  h += '</div>';
-  h += '</div>';
-  h += '</div>';
+  // Chat card
+  h += '<div class="card">';
+  h += '<div class="chat-wrap">';
+  h += '<div class="chat-messages" id="chat-messages"><div class="empty-state">Loading conversation...</div></div>';
+  if (off) h += '<div class="offline-banner">Agent is offline. Messages will be delivered when it comes back online.</div>';
+  h += '<div class="chat-input-row">';
+  h += '<textarea id="chat-input" placeholder="Ask about this product..." rows="1"' + (off ? ' disabled' : '') + '></textarea>';
+  h += '<button class="chat-send" id="btn-send" onclick="sendChat()"' + (off ? ' disabled' : '') + '>Send</button>';
+  h += '<button class="chat-buy" id="btn-buy" onclick="buyProduct()"' + (off ? ' disabled' : '') + '>Buy \\u26A1</button>';
+  h += '</div></div></div>';
 
-  // Reviews section placeholder
-  h += '<div id="reviews-section"></div>';
+  // Reviews
+  h += '<div class="card" id="reviews-section"></div>';
 
   document.getElementById('content').innerHTML = h;
+  document.title = esc(p.name) + ' — Akemon';
 
-  if (p.detail_markdown && typeof marked !== 'undefined') {
-    document.getElementById('detail-md').innerHTML = marked.parse(p.detail_markdown);
-    document.querySelectorAll('#detail-md img').forEach(function(img) {
-      img.onerror = function() { this.style.display = 'none'; };
-    });
+  // Render detail
+  if (p.detail_html) {
+    var iframe = document.getElementById('detail-iframe');
+    if (iframe) {
+      var resizeScript = '<style>body,html{overflow:hidden!important;}</style><script>function _nh(){parent.postMessage({type:"iframeHeight",h:document.documentElement.scrollHeight},"*")}new ResizeObserver(_nh).observe(document.documentElement);window.addEventListener("load",_nh);<\\/script>';
+      iframe.srcdoc = p.detail_html + resizeScript;
+    }
+  } else if (p.detail_markdown && typeof marked !== 'undefined') {
+    var mdEl = document.getElementById('detail-md');
+    if (mdEl) {
+      mdEl.innerHTML = marked.parse(p.detail_markdown);
+      mdEl.querySelectorAll('img').forEach(function(img) { img.onerror = function() { this.style.display = 'none'; }; });
+    }
   }
 
-  if (!off) {
-    var ta = document.getElementById('inp-task');
-    if (ta) ta.focus();
-  }
-
+  loadChat();
   loadReviews();
 }
 
-var tmr = null;
-var pollTmr = null;
-function buyProduct() {
-  if (!product) return;
-  var task = document.getElementById('inp-task').value.trim();
-  if (!task) { document.getElementById('inp-task').focus(); return; }
+// iframe height listener
+window.addEventListener('message', function(e) {
+  if (e.data && e.data.type === 'iframeHeight') {
+    var iframe = document.getElementById('detail-iframe');
+    if (iframe) iframe.style.height = Math.min(e.data.h, 800) + 'px';
+  }
+});
 
-  var resultEl = document.getElementById('result');
-  resultEl.className = 'result on';
-  resultEl.innerHTML = '<div id="result-text" class="result-text" style="text-align:center;color:#aa8800">Order placed! Waiting for agent...</div>';
+// --- Chat ---
 
-  var btn = document.getElementById('btn-buy');
-  var ld = document.getElementById('loading');
+function loadChat() {
+  var sec = document.getElementById('chat-messages');
+  if (!sec || !product) return;
+
+  authFetch('/v1/agent/' + encodeURIComponent(product.agent_name) + '/chat/mine')
+  .then(function(r) { return r.ok ? r.json() : null; })
+  .then(function(data) {
+    if (!data || (!data.rounds.length && !data.summary)) {
+      sec.innerHTML = '<div class="empty-state">No conversation yet. Ask a question or place an order.</div>';
+      return;
+    }
+    renderChatMessages(data);
+  })
+  .catch(function() {
+    sec.innerHTML = '<div class="empty-state">Send a message to start a conversation.</div>';
+  });
+}
+
+function renderChatMessages(data) {
+  var sec = document.getElementById('chat-messages');
+  if (!sec) return;
+  var h = '';
+
+  if (data.summary) {
+    h += '<div class="chat-summary" onclick="this.classList.toggle(\'expanded\')">';
+    h += '<div class="chat-summary-label">Context</div>';
+    h += '<div class="chat-summary-body">' + esc(data.summary) + '</div>';
+    h += '</div>';
+  }
+
+  var rounds = data.rounds || [];
+  var rsi = data.recentStartIndex != null ? data.recentStartIndex : 0;
+  var lastDate = '';
+
+  for (var i = 0; i < rounds.length; i++) {
+    if (i === rsi && rsi > 0) {
+      h += '<div class="chat-divider">recent</div>';
+    }
+    var r = rounds[i];
+    var d = (r.ts || '').substring(0, 10);
+    if (d && d !== lastDate) {
+      h += '<div class="chat-ts">' + esc(d) + '</div>';
+      lastDate = d;
+    }
+    var cls = r.role === 'user' ? 'user' : 'agent';
+    h += '<div class="chat-bubble ' + cls + '">' + esc(r.content) + '</div>';
+  }
+
+  if (!rounds.length && !data.summary) {
+    h += '<div class="empty-state">No messages yet.</div>';
+  }
+
+  sec.innerHTML = h;
+  sec.scrollTop = sec.scrollHeight;
+}
+
+var chatSending = false;
+function sendChat() {
+  if (!product || chatSending) return;
+  var inp = document.getElementById('chat-input');
+  var msg = inp.value.trim();
+  if (!msg) return;
+
+  chatSending = true;
+  var btn = document.getElementById('btn-send');
   btn.disabled = true;
-  ld.className = 'loading on';
+  btn.textContent = 'Sending...';
+  inp.value = '';
 
-  var t0 = Date.now();
-  tmr = setInterval(function() {
-    var s = Math.floor((Date.now() - t0) / 1000);
-    var m = Math.floor(s / 60);
-    var ss = s % 60;
-    document.getElementById('elapsed').textContent = (m > 0 ? m + 'm ' : '') + ss + 's';
-  }, 1000);
+  var sec = document.getElementById('chat-messages');
+  // Remove empty state
+  var es = sec.querySelector('.empty-state');
+  if (es) es.remove();
+  // Add user bubble
+  var ub = document.createElement('div');
+  ub.className = 'chat-bubble user';
+  ub.textContent = msg;
+  sec.appendChild(ub);
+  sec.scrollTop = sec.scrollHeight;
 
-  fetch('/v1/products/' + PRODUCT_ID + '/buy', {
+  authFetch('/v1/agent/' + encodeURIComponent(product.agent_name) + '/orders', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ task: msg })
+  })
+  .then(function(r) { if (!r.ok) return r.json().then(function(b) { throw new Error(b.error || 'Failed'); }); return r.json(); })
+  .then(function(data) {
+    var oid = data.order_id;
+    pollChatReply(oid, sec);
+  })
+  .catch(function(err) {
+    chatDone();
+    if (ub.parentNode) ub.parentNode.removeChild(ub);
+    inp.value = msg;
+    var eb = document.createElement('div');
+    eb.className = 'chat-bubble agent';
+    eb.textContent = 'Error: ' + (err.message || 'Unknown');
+    eb.style.color = '#dc2626';
+    sec.appendChild(eb);
+  });
+
+  function chatDone() {
+    chatSending = false;
+    btn.disabled = !agentOnline;
+    btn.textContent = 'Send';
+  }
+
+  // Poll for agent reply
+  function pollChatReply(oid, sec) {
+    var poll = setInterval(function() {
+      fetch('/v1/orders/' + oid).then(function(r) { return r.json(); }).then(function(o) {
+        if (o.status === 'completed') {
+          clearInterval(poll);
+          chatDone();
+          var ab = document.createElement('div');
+          ab.className = 'chat-bubble agent';
+          ab.textContent = o.result_text || '(no response)';
+          sec.appendChild(ab);
+          sec.scrollTop = sec.scrollHeight;
+        } else if (o.status === 'failed' || o.status === 'cancelled') {
+          clearInterval(poll);
+          chatDone();
+          var eb = document.createElement('div');
+          eb.className = 'chat-bubble agent';
+          eb.textContent = '(failed to respond)';
+          eb.style.color = '#dc2626';
+          sec.appendChild(eb);
+          sec.scrollTop = sec.scrollHeight;
+        }
+      }).catch(function() {});
+    }, 3000);
+  }
+}
+
+// --- Buy ---
+
+function buyProduct() {
+  if (!product || chatSending) return;
+  var inp = document.getElementById('chat-input');
+  var task = inp.value.trim();
+  if (!task) { inp.focus(); inp.placeholder = 'Describe what you need before buying...'; return; }
+
+  var sec = document.getElementById('chat-messages');
+  var es = sec.querySelector('.empty-state');
+  if (es) es.remove();
+
+  // User bubble
+  var ub = document.createElement('div');
+  ub.className = 'chat-bubble user';
+  ub.textContent = task;
+  sec.appendChild(ub);
+  inp.value = '';
+
+  // Order card (processing)
+  var card = document.createElement('div');
+  card.className = 'chat-order-card';
+  card.innerHTML = '<div class="order-status"><span class="order-spinner">\\u29D6</span> Placing order...</div><div class="order-task">' + esc(task.substring(0, 200)) + '</div>';
+  sec.appendChild(card);
+  sec.scrollTop = sec.scrollHeight;
+
+  var buyBtn = document.getElementById('btn-buy');
+  var sendBtn = document.getElementById('btn-send');
+  buyBtn.disabled = true;
+  sendBtn.disabled = true;
+
+  authFetch('/v1/products/' + PRODUCT_ID + '/buy', {
     method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({task: task})
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ task: task })
   })
   .then(function(r) {
     if (!r.ok) return r.json().then(function(b) { throw new Error(b.error || 'Order failed'); });
     return r.json();
   })
   .then(function(data) {
-    orderID = data.order_id;
-    document.getElementById('result-text').innerHTML = '\u23F3 Order <a href="/order/' + esc(orderID) + '" style="color:#00d4aa">#' + esc(orderID.substring(0, 8)) + '</a> placed. Status: <strong>pending</strong><br>Waiting for agent to accept and process...<br><small style="color:#555">Bookmark the order link above to check back later.</small>';
-    pollOrder();
+    var oid = data.order_id;
+    card.innerHTML = '<div class="order-status"><span class="order-spinner">\\u29D6</span> Order <a href="/order/' + esc(oid) + '" style="color:#92400e">#' + esc(oid.substring(0, 8)) + '</a> \\u00B7 pending</div><div class="order-task">' + esc(task.substring(0, 200)) + '</div>';
+    pollBuyOrder(oid, card, sec);
   })
   .catch(function(err) {
-    done();
-    document.getElementById('result-text').innerHTML = '<span style="color:#ff6666">' + esc(err.message || 'Order failed') + '</span>';
+    card.className = 'chat-fail-card';
+    card.innerHTML = '\\u2716 ' + esc(err.message || 'Order failed');
+    buyBtn.disabled = !agentOnline;
+    sendBtn.disabled = !agentOnline;
   });
 }
 
-function pollOrder() {
-  if (!orderID) return;
-  pollTmr = setInterval(function() {
-    fetch('/v1/orders/' + orderID)
+function pollBuyOrder(oid, card, sec) {
+  var poll = setInterval(function() {
+    fetch('/v1/orders/' + oid)
     .then(function(r) { return r.json(); })
     .then(function(o) {
-      var orderLink = '<a href="/order/' + esc(orderID) + '" style="color:#555;font-size:0.75rem">[View order]</a>';
-      if (o.status === 'completed') {
-        done();
-        document.getElementById('result-text').innerHTML = '<div style="color:#00d4aa;font-weight:600;margin-bottom:0.5rem">\u2714 Delivered! ' + orderLink + '</div>' + esc(o.result_text || '');
-      } else if (o.status === 'failed') {
-        done();
-        document.getElementById('result-text').innerHTML = '<span style="color:#ff6644">\u2716 Agent could not deliver. No charges.</span> ' + orderLink;
-      } else if (o.status === 'cancelled') {
-        done();
-        document.getElementById('result-text').innerHTML = '<span style="color:#ff6666">\u2716 Order cancelled.</span> ' + orderLink;
-      } else if (o.status === 'processing') {
-        document.getElementById('result-text').innerHTML = '\u2699 Agent is working on your order...' + (o.retry_count > 0 ? ' (retry ' + o.retry_count + ')' : '');
+      if (o.status === 'processing') {
+        card.querySelector('.order-status').innerHTML = '<span class="order-spinner">\\u29D6</span> Order <a href="/order/' + esc(oid) + '" style="color:#92400e">#' + esc(oid.substring(0, 8)) + '</a> \\u00B7 processing' + (o.retry_count > 0 ? ' (retry ' + o.retry_count + ')' : '');
+      } else if (o.status === 'completed') {
+        clearInterval(poll);
+        enableInput();
+        // Replace order card with delivery card
+        var result = o.result_text || '';
+        var preview = result.substring(0, 300);
+        var hasMore = result.length > 300;
+        var dh = '<div class="delivery-header">\\u2714 Delivered <a href="/order/' + esc(oid) + '" style="color:#166534;font-size:11px">#' + esc(oid.substring(0,8)) + '</a></div>';
+        dh += '<div class="delivery-preview">' + esc(preview) + (hasMore ? '...' : '') + '</div>';
+        if (hasMore) {
+          dh += '<button class="delivery-toggle" onclick="this.previousElementSibling.style.display=\'none\';this.nextElementSibling.classList.add(\'show\');this.style.display=\'none\'">Show full result</button>';
+          dh += '<div class="delivery-full">' + esc(result) + '</div>';
+        }
+        dh += '<div class="delivery-actions">';
+        dh += '<button class="btn-confirm" onclick="confirmOrd(\'' + esc(oid) + '\',this)">\\u2714 Looks good</button>';
+        dh += '<button class="btn-cancel" onclick="cancelOrd(\'' + esc(oid) + '\',this)">\\u2716 Not satisfied</button>';
+        dh += '</div>';
+        card.className = 'chat-delivery-card';
+        card.innerHTML = dh;
+        sec.scrollTop = sec.scrollHeight;
+      } else if (o.status === 'failed' || o.status === 'cancelled') {
+        clearInterval(poll);
+        enableInput();
+        card.className = 'chat-fail-card';
+        card.innerHTML = '\\u2716 Order ' + (o.status === 'failed' ? 'failed' : 'cancelled') + '. <a href="/order/' + esc(oid) + '" style="color:#991b1b">#' + esc(oid.substring(0,8)) + '</a>';
+        sec.scrollTop = sec.scrollHeight;
       }
     })
     .catch(function() {});
-  }, 5000);
+  }, 4000);
+  activeOrders[oid] = poll;
 }
 
-function done() {
-  if (tmr) { clearInterval(tmr); tmr = null; }
-  if (pollTmr) { clearInterval(pollTmr); pollTmr = null; }
-  var ld = document.getElementById('loading');
-  if (ld) ld.className = 'loading';
-  var btn = document.getElementById('btn-buy');
-  if (btn) btn.disabled = false;
+function enableInput() {
+  var buyBtn = document.getElementById('btn-buy');
+  var sendBtn = document.getElementById('btn-send');
+  if (buyBtn) buyBtn.disabled = !agentOnline;
+  if (sendBtn) sendBtn.disabled = !agentOnline;
 }
 
-document.addEventListener('keydown', function(e) {
-  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-    e.preventDefault();
-    buyProduct();
-  }
-});
+function confirmOrd(oid, btn) {
+  var card = btn.closest('.chat-delivery-card');
+  var actions = card.querySelector('.delivery-actions');
+  actions.innerHTML = '<span style="color:#166534;font-size:12px">\\u2714 Confirmed! Thank you.</span>';
+  authFetch('/v1/orders/' + oid + '/confirm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(function(){});
+}
+
+function cancelOrd(oid, btn) {
+  var card = btn.closest('.chat-delivery-card');
+  var actions = card.querySelector('.delivery-actions');
+  actions.innerHTML = '<span style="color:#991b1b;font-size:12px">\\u2716 Cancelled. No charges.</span>';
+  card.className = 'chat-fail-card';
+  authFetch('/v1/orders/' + oid + '/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(function(){});
+}
+
+// --- Reviews ---
 
 function starHTML(rating) {
   var s = '';
-  for (var i = 1; i <= 5; i++) s += i <= rating ? '\u2605' : '\u2606';
+  for (var i = 1; i <= 5; i++) s += i <= rating ? '\\u2605' : '\\u2606';
   return s;
 }
 
@@ -1150,15 +1384,15 @@ function loadReviews() {
   .then(function(r) { return r.json(); })
   .then(function(reviews) {
     var el = document.getElementById('reviews-section');
+    if (!el) return;
     if (!reviews || !reviews.length) {
-      el.innerHTML = '<div class="reviews-card"><div class="reviews-title">\u{1F4AC} Reviews</div><div class="no-reviews">No reviews yet.</div></div>';
+      el.innerHTML = '<div class="reviews-title">Reviews</div><div class="no-reviews">No reviews yet.</div>';
       return;
     }
     var sum = 0;
     reviews.forEach(function(r) { sum += r.rating; });
     var avg = (sum / reviews.length).toFixed(1);
-    var h = '<div class="reviews-card">';
-    h += '<div class="reviews-title">\u{1F4AC} Reviews (' + reviews.length + ')</div>';
+    var h = '<div class="reviews-title">Reviews (' + reviews.length + ')</div>';
     h += '<div class="reviews-summary">';
     h += '<span class="avg-rating">' + avg + '</span>';
     h += '<span class="stars">' + starHTML(Math.round(sum / reviews.length)) + '</span>';
@@ -1166,17 +1400,32 @@ function loadReviews() {
     reviews.forEach(function(r) {
       h += '<div class="review-item">';
       h += '<div class="review-header">';
-      h += '<span class="review-author">' + esc(r.reviewer_name) + ' <span class="review-stars">' + starHTML(r.rating) + '</span></span>';
+      h += '<span class="review-author">' + esc(r.reviewer_name) + '<span class="review-stars">' + starHTML(r.rating) + '</span></span>';
       h += '<span class="review-date">' + (r.created_at ? new Date(r.created_at).toLocaleDateString() : '') + '</span>';
       h += '</div>';
       if (r.comment) h += '<div class="review-comment">' + esc(r.comment) + '</div>';
       h += '</div>';
     });
-    h += '</div>';
     el.innerHTML = h;
   })
   .catch(function() {});
 }
+
+// --- Keyboard ---
+
+document.addEventListener('keydown', function(e) {
+  if (e.target && e.target.id === 'chat-input') {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendChat();
+    } else if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault();
+      buyProduct();
+    }
+  }
+});
+
+// --- Load ---
 
 function load() {
   fetch('/v1/products/' + PRODUCT_ID)
@@ -1331,7 +1580,7 @@ function load() {
       h += '<div class="order-parties">';
       h += 'Seller: <a class="seller" href="/agent/' + encodeURIComponent(o.seller_name) + '">' + esc(o.seller_name) + '</a>';
       if (o.buyer_name) h += ' &nbsp;\u2190&nbsp; Buyer: <a class="buyer" href="/agent/' + encodeURIComponent(o.buyer_name) + '">' + esc(o.buyer_name) + '</a>';
-      else if (o.buyer_ip) h += ' &nbsp;\u2190&nbsp; Buyer: <span class="buyer">human</span>';
+      else if (o.buyer_ip) h += ' &nbsp;\u2190&nbsp; Buyer: <span class="buyer" title="' + esc(o.buyer_ip) + '">' + esc(o.buyer_ip.length > 16 ? o.buyer_ip.substring(0, 16) + '\u2026' : o.buyer_ip) + '</span>';
       h += '</div>';
       h += '<div class="order-amount">';
       h += 'Price: <strong>' + o.total_price + '</strong> credits';

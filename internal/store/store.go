@@ -40,6 +40,7 @@ func (s *Store) Migrate() error {
 	s.db.Exec(`ALTER TABLE agents ADD COLUMN price INTEGER DEFAULT 1`)
 	s.db.Exec(`ALTER TABLE accounts ADD COLUMN credits INTEGER DEFAULT 100`)
 	s.db.Exec(`ALTER TABLE products ADD COLUMN detail_markdown TEXT DEFAULT ''`)
+	s.db.Exec(`ALTER TABLE products ADD COLUMN detail_html TEXT DEFAULT ''`)
 	s.db.Exec(`ALTER TABLE agents ADD COLUMN self_intro TEXT DEFAULT ''`)
 	s.db.Exec(`ALTER TABLE agents ADD COLUMN canvas TEXT DEFAULT ''`)
 	s.db.Exec(`ALTER TABLE agents ADD COLUMN mood TEXT DEFAULT ''`)
@@ -806,6 +807,7 @@ type Product struct {
 	Name           string `json:"name"`
 	Description    string `json:"description"`
 	DetailMarkdown string `json:"detail_markdown,omitempty"`
+	DetailHTML     string `json:"detail_html,omitempty"`
 	Price          int    `json:"price"`
 	Status         string `json:"status"`
 	PurchaseCount  int    `json:"purchase_count"`
@@ -836,9 +838,9 @@ func (s *Store) CreateProduct(p *Product) error {
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.db.Exec(`
-		INSERT INTO products (id, agent_id, name, description, detail_markdown, price, status, purchase_count, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, 'active', 0, ?, ?)
-	`, p.ID, p.AgentID, p.Name, p.Description, p.DetailMarkdown, p.Price, now, now)
+		INSERT INTO products (id, agent_id, name, description, detail_markdown, detail_html, price, status, purchase_count, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'active', 0, ?, ?)
+	`, p.ID, p.AgentID, p.Name, p.Description, p.DetailMarkdown, p.DetailHTML, p.Price, now, now)
 	return err
 }
 
@@ -894,9 +896,9 @@ func (s *Store) ListAllProducts() ([]ProductListing, error) {
 func (s *Store) GetProduct(id string) (*Product, error) {
 	p := &Product{}
 	err := s.db.QueryRow(`
-		SELECT id, agent_id, name, description, COALESCE(detail_markdown, ''), price, status, purchase_count, created_at, updated_at
+		SELECT id, agent_id, name, description, COALESCE(detail_markdown, ''), COALESCE(detail_html, ''), price, status, purchase_count, created_at, updated_at
 		FROM products WHERE id = ?
-	`, id).Scan(&p.ID, &p.AgentID, &p.Name, &p.Description, &p.DetailMarkdown, &p.Price, &p.Status, &p.PurchaseCount, &p.CreatedAt, &p.UpdatedAt)
+	`, id).Scan(&p.ID, &p.AgentID, &p.Name, &p.Description, &p.DetailMarkdown, &p.DetailHTML, &p.Price, &p.Status, &p.PurchaseCount, &p.CreatedAt, &p.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -906,14 +908,14 @@ func (s *Store) GetProduct(id string) (*Product, error) {
 	return p, nil
 }
 
-func (s *Store) UpdateProduct(id, name, description, detailMarkdown string, price int) error {
+func (s *Store) UpdateProduct(id, name, description, detailMarkdown, detailHTML string, price int) error {
 	if price <= 0 {
 		price = 1
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.db.Exec(`
-		UPDATE products SET name = ?, description = ?, detail_markdown = ?, price = ?, updated_at = ? WHERE id = ?
-	`, name, description, detailMarkdown, price, now, id)
+		UPDATE products SET name = ?, description = ?, detail_markdown = ?, detail_html = ?, price = ?, updated_at = ? WHERE id = ?
+	`, name, description, detailMarkdown, detailHTML, price, now, id)
 	return err
 }
 

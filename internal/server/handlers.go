@@ -398,6 +398,28 @@ func (s *Server) authenticateAgentOwner(w http.ResponseWriter, r *http.Request, 
 	return true
 }
 
+// checkAgentAccess verifies access for private agents. Public agents always pass.
+// Returns true if access is granted; writes 401 and returns false otherwise.
+func (s *Server) checkAgentAccess(w http.ResponseWriter, r *http.Request, agentName string) bool {
+	dbAgent, err := s.relay.Store.GetAgentByName(agentName)
+	if err != nil || dbAgent == nil {
+		return true // agent not in DB → allow (it may be online but unregistered edge case)
+	}
+	if dbAgent.Public {
+		return true
+	}
+	token := auth.ExtractBearer(r)
+	if token == "" {
+		jsonError(w, "this agent is private — access key required", http.StatusUnauthorized)
+		return false
+	}
+	if !auth.VerifyToken(token, dbAgent.AccessHash) && !auth.VerifyToken(token, dbAgent.SecretHash) {
+		jsonError(w, "invalid access key", http.StatusUnauthorized)
+		return false
+	}
+	return true
+}
+
 func (s *Server) handleGetContext(w http.ResponseWriter, r *http.Request) {
 	agentName := r.PathValue("name")
 	sessionID := r.PathValue("sessionId")
@@ -502,6 +524,10 @@ func (s *Server) handleChatMine(w http.ResponseWriter, r *http.Request) {
 	agentName := r.PathValue("name")
 	if agentName == "" {
 		http.Error(w, `{"error":"missing agent name"}`, http.StatusBadRequest)
+		return
+	}
+	// Private agents require access or secret token
+	if !s.checkAgentAccess(w, r, agentName) {
 		return
 	}
 	pubId := derivePublisherID(r)
@@ -1459,6 +1485,7 @@ func (s *Server) handleGetProduct(w http.ResponseWriter, r *http.Request) {
 		"name":            product.Name,
 		"description":     product.Description,
 		"detail_markdown": product.DetailMarkdown,
+		"detail_html":     product.DetailHTML,
 		"price":           product.Price,
 		"purchase_count":  product.PurchaseCount,
 		"created_at":      product.CreatedAt,
@@ -1481,6 +1508,7 @@ func (s *Server) handleCreateProduct(w http.ResponseWriter, r *http.Request) {
 		Name           string `json:"name"`
 		Description    string `json:"description"`
 		DetailMarkdown string `json:"detail_markdown"`
+		DetailHTML     string `json:"detail_html"`
 		Price          int    `json:"price"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, s.config.MaxMessageBytes)).Decode(&req); err != nil {
@@ -1498,6 +1526,7 @@ func (s *Server) handleCreateProduct(w http.ResponseWriter, r *http.Request) {
 		Name:           req.Name,
 		Description:    req.Description,
 		DetailMarkdown: req.DetailMarkdown,
+		DetailHTML:     req.DetailHTML,
 		Price:          req.Price,
 	}
 	if err := s.relay.Store.CreateProduct(p); err != nil {
@@ -1534,6 +1563,7 @@ func (s *Server) handleUpdateProduct(w http.ResponseWriter, r *http.Request) {
 		Name           string `json:"name"`
 		Description    string `json:"description"`
 		DetailMarkdown string `json:"detail_markdown"`
+		DetailHTML     string `json:"detail_html"`
 		Price          int    `json:"price"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, s.config.MaxMessageBytes)).Decode(&req); err != nil {
@@ -1549,11 +1579,15 @@ func (s *Server) handleUpdateProduct(w http.ResponseWriter, r *http.Request) {
 	if req.DetailMarkdown == "" {
 		req.DetailMarkdown = product.DetailMarkdown
 	}
+	// detail_html: empty string means "clear it", so only default if not provided at all
+	if req.DetailHTML == "" && product.DetailHTML != "" {
+		req.DetailHTML = product.DetailHTML
+	}
 	if req.Price <= 0 {
 		req.Price = product.Price
 	}
 
-	if err := s.relay.Store.UpdateProduct(productID, req.Name, req.Description, req.DetailMarkdown, req.Price); err != nil {
+	if err := s.relay.Store.UpdateProduct(productID, req.Name, req.Description, req.DetailMarkdown, req.DetailHTML, req.Price); err != nil {
 		log.Printf("[products] update error: %v", err)
 		jsonError(w, "internal error", http.StatusInternalServerError)
 		return
@@ -1861,6 +1895,19 @@ func (s *Server) handleCreateAdHocOrder(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Non-public agents require a valid access token or secret token
+	if !targetAgent.Public {
+		token := auth.ExtractBearer(r)
+		if token == "" {
+			jsonError(w, "this agent is private — access key required", http.StatusUnauthorized)
+			return
+		}
+		if !auth.VerifyToken(token, targetAgent.AccessHash) && !auth.VerifyToken(token, targetAgent.SecretHash) {
+			jsonError(w, "invalid access key", http.StatusUnauthorized)
+			return
+		}
+	}
+
 	var req struct {
 		Task          string `json:"task"`
 		OfferPrice    int    `json:"offer_price"`
@@ -1903,7 +1950,7 @@ func (s *Server) handleCreateAdHocOrder(w http.ResponseWriter, r *http.Request) 
 		SellerAgentID:   targetAgent.ID,
 		SellerAgentName: targetAgent.Name,
 		BuyerAgentID:    resolvedBuyerID,
-		BuyerIP:         clientIP(r),
+		BuyerIP:         derivePublisherID(r),
 		BuyerTask:       req.Task,
 		ParentOrderID:   req.ParentOrderID,
 		TotalPrice:      price,
@@ -2623,6 +2670,70 @@ func (s *Server) handleListAccountAgents(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+// --- Auth Check ---
+
+func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
+	token := auth.ExtractBearer(r)
+	if token == "" {
+		// Not logged in — return anonymous identity from IP
+		pubID := derivePublisherID(r)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"role": "anonymous",
+			"id":   pubID,
+		})
+		return
+	}
+
+	pubID := func() string {
+		h := sha256.Sum256([]byte(token))
+		return fmt.Sprintf("%x", h[:6])
+	}()
+
+	// Check if token matches any agent's secret key
+	allAgents, err := s.relay.Store.ListAgents()
+	if err != nil {
+		jsonError(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	var accountID string
+	var ownedAgents []string
+	for _, a := range allAgents {
+		agent, err := s.relay.Store.GetAgentByName(a.Name)
+		if err != nil || agent == nil {
+			continue
+		}
+		if auth.VerifyToken(token, agent.SecretHash) {
+			accountID = agent.AccountID
+			break
+		}
+	}
+
+	if accountID != "" {
+		// Owner — list all agents under this account
+		acctAgents, _ := s.relay.Store.ListAgentsByAccount(accountID)
+		for _, a := range acctAgents {
+			ownedAgents = append(ownedAgents, a.Name)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"role":       "owner",
+			"id":         pubID,
+			"account_id": accountID,
+			"agents":     ownedAgents,
+		})
+		return
+	}
+
+	// Valid token but not an owner — regular user
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"role": "user",
+		"id":   pubID,
+	})
+}
+
 // --- World Feed ---
 
 func (s *Server) handleFeed(w http.ResponseWriter, r *http.Request) {
@@ -2797,4 +2908,130 @@ func (s *Server) handleListAccountAgentsByID(w http.ResponseWriter, r *http.Requ
 		"account_id": accountID,
 		"agents":     out,
 	})
+}
+
+// handleTerminalWebSocket upgrades the browser connection to WebSocket and
+// proxies terminal I/O between the browser and the agent's PTY via the
+// existing agent WebSocket connection.
+func (s *Server) handleTerminalWebSocket(w http.ResponseWriter, r *http.Request) {
+	agentName := r.PathValue("name")
+	if agentName == "" {
+		http.Error(w, `{"error":"missing agent name"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Auth: accept token from query param (WebSocket can't set headers)
+	// or from Authorization header.
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		token = auth.ExtractBearer(r)
+	}
+	dbAgent, err := s.relay.Store.GetAgentByName(agentName)
+	if err != nil || dbAgent == nil {
+		http.Error(w, `{"error":"agent not found"}`, http.StatusNotFound)
+		return
+	}
+	// Terminal requires owner (secret key) only — too dangerous for access key holders
+	if token == "" {
+		http.Error(w, `{"error":"authentication required — owner only"}`, http.StatusUnauthorized)
+		return
+	}
+	if !auth.VerifyToken(token, dbAgent.SecretHash) {
+		http.Error(w, `{"error":"terminal access is restricted to agent owner"}`, http.StatusForbidden)
+		return
+	}
+
+	agent := s.relay.Registry.Get(agentName)
+	if agent == nil {
+		http.Error(w, `{"error":"agent offline"}`, http.StatusBadGateway)
+		return
+	}
+
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("[terminal] websocket upgrade error: %v", err)
+		return
+	}
+	defer conn.Close()
+
+	// Register terminal session (displace any previous)
+	s.termMu.Lock()
+	old := s.termSessions[agentName]
+	s.termSessions[agentName] = &terminalSession{browserConn: conn}
+	s.termMu.Unlock()
+	if old != nil {
+		old.mu.Lock()
+		old.browserConn.Close()
+		old.mu.Unlock()
+	}
+
+	defer func() {
+		s.termMu.Lock()
+		if ts := s.termSessions[agentName]; ts != nil && ts.browserConn == conn {
+			delete(s.termSessions, agentName)
+		}
+		s.termMu.Unlock()
+		agent.Send(&relay.RelayMessage{Type: relay.TypeTerminalStop})
+		log.Printf("[terminal] browser disconnected from %s", agentName)
+	}()
+
+	// Read first message from browser: {cols, rows}
+	_, firstMsg, err := conn.ReadMessage()
+	if err != nil {
+		return
+	}
+	var initMsg struct {
+		Cols int `json:"cols"`
+		Rows int `json:"rows"`
+	}
+	json.Unmarshal(firstMsg, &initMsg)
+	if initMsg.Cols <= 0 {
+		initMsg.Cols = 80
+	}
+	if initMsg.Rows <= 0 {
+		initMsg.Rows = 24
+	}
+
+	// Tell agent to start PTY
+	if err := agent.Send(&relay.RelayMessage{
+		Type: relay.TypeTerminalStart,
+		Cols: initMsg.Cols,
+		Rows: initMsg.Rows,
+	}); err != nil {
+		log.Printf("[terminal] failed to send terminal_start to %s: %v", agentName, err)
+		return
+	}
+	log.Printf("[terminal] started for %s (%dx%d)", agentName, initMsg.Cols, initMsg.Rows)
+
+	// Relay browser messages → agent
+	for {
+		_, raw, err := conn.ReadMessage()
+		if err != nil {
+			break
+		}
+		var msg relay.RelayMessage
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			continue
+		}
+		switch msg.Type {
+		case relay.TypeTerminalData:
+			agent.Send(&msg)
+		case relay.TypeTerminalResize:
+			agent.Send(&msg)
+		}
+	}
+}
+
+// forwardToTerminalBrowser sends a terminal message from the agent to the
+// connected browser WebSocket, if any.
+func (s *Server) forwardToTerminalBrowser(agentName string, msg *relay.RelayMessage) {
+	s.termMu.RLock()
+	ts := s.termSessions[agentName]
+	s.termMu.RUnlock()
+	if ts == nil {
+		return
+	}
+	ts.mu.Lock()
+	ts.browserConn.WriteJSON(msg)
+	ts.mu.Unlock()
 }

@@ -239,6 +239,7 @@ func (s *Server) parseAndCreateProducts(response string, dbAgent *store.Agent) i
 		Name           string `json:"name"`
 		Description    string `json:"description"`
 		DetailMarkdown string `json:"detail_markdown"`
+		DetailHTML     string `json:"detail_html"`
 		Price          int    `json:"price"`
 	}
 
@@ -272,6 +273,7 @@ func (s *Server) parseAndCreateProducts(response string, dbAgent *store.Agent) i
 			Name:           p.Name,
 			Description:    p.Description,
 			DetailMarkdown: p.DetailMarkdown,
+			DetailHTML:     p.DetailHTML,
 			Price:          p.Price,
 		}
 		if err := s.relay.Store.CreateProduct(product); err != nil {
@@ -298,12 +300,14 @@ func (s *Server) applyProductReview(response string, dbAgent *store.Agent) {
 			Name           string `json:"name"`
 			Description    string `json:"description"`
 			DetailMarkdown string `json:"detail_markdown"`
+			DetailHTML     string `json:"detail_html"`
 			Price          int    `json:"price"`
 		} `json:"update"`
 		Create []struct {
 			Name           string `json:"name"`
 			Description    string `json:"description"`
 			DetailMarkdown string `json:"detail_markdown"`
+			DetailHTML     string `json:"detail_html"`
 			Price          int    `json:"price"`
 		} `json:"create"`
 	}
@@ -339,11 +343,15 @@ func (s *Server) applyProductReview(response string, dbAgent *store.Agent) {
 		if detail == "" {
 			detail = existing.DetailMarkdown
 		}
+		detailHTML := u.DetailHTML
+		if detailHTML == "" {
+			detailHTML = existing.DetailHTML
+		}
 		price := u.Price
 		if price <= 0 {
 			price = existing.Price
 		}
-		s.relay.Store.UpdateProduct(u.ID, name, desc, detail, price)
+		s.relay.Store.UpdateProduct(u.ID, name, desc, detail, detailHTML, price)
 		log.Printf("[scheduler] %s: updated product %s", dbAgent.Name, u.ID)
 	}
 
@@ -361,6 +369,7 @@ func (s *Server) applyProductReview(response string, dbAgent *store.Agent) {
 			Name:           c.Name,
 			Description:    c.Description,
 			DetailMarkdown: c.DetailMarkdown,
+			DetailHTML:     c.DetailHTML,
 			Price:          c.Price,
 		}
 		s.relay.Store.CreateProduct(product)
