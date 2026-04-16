@@ -1133,7 +1133,7 @@ function loadChat() {
   var sec = document.getElementById('chat-messages');
   if (!sec || !product) return;
 
-  authFetch('/v1/agent/' + encodeURIComponent(product.agent_name) + '/chat/mine')
+  authFetch('/v1/agent/' + encodeURIComponent(product.agent_name) + '/chat/mine?product_id=' + encodeURIComponent(PRODUCT_ID))
   .then(function(r) { return r.ok ? r.json() : null; })
   .then(function(data) {
     if (!data || (!data.rounds.length && !data.summary)) {

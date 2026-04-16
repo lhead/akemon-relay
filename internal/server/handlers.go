@@ -532,6 +532,10 @@ func (s *Server) handleChatMine(w http.ResponseWriter, r *http.Request) {
 	}
 	pubId := derivePublisherID(r)
 	convId := "pub_" + pubId
+	// Product-scoped conversations: append :prod_{id} suffix
+	if productID := r.URL.Query().Get("product_id"); productID != "" {
+		convId += ":prod_" + productID
+	}
 	s.proxyAgentSelfAPI(w, agentName, "/self/conversation/"+convId)
 }
 
@@ -1671,7 +1675,7 @@ func (s *Server) handleBuyProduct(w http.ResponseWriter, r *http.Request) {
 		SellerAgentID:   product.AgentID,
 		SellerAgentName: dbAgent.Name,
 		BuyerAgentID:    resolvedBuyerID,
-		BuyerIP:         clientIP(r),
+		BuyerIP:         derivePublisherID(r),
 		BuyerTask:       req.Task,
 		TotalPrice:      product.Price,
 		HumanOrigin:     resolvedBuyerID == "",
