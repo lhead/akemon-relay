@@ -17,6 +17,13 @@ const (
 	TypeAgentCallResult = "agent_call_result"
 	TypeSetPrice        = "set_price"
 	TypeOrderNotify     = "order_notify"
+
+	// Terminal (PTY) streaming
+	TypeTerminalStart  = "terminal_start"
+	TypeTerminalData   = "terminal_data"
+	TypeTerminalResize = "terminal_resize"
+	TypeTerminalStop   = "terminal_stop"
+	TypeTerminalExit   = "terminal_exit"
 )
 
 // RelayMessage is the envelope for all WebSocket communication.
@@ -55,6 +62,10 @@ type RelayMessage struct {
 
 	// Order notification fields
 	OrderID string `json:"order_id,omitempty"`
+
+	// Terminal fields
+	Cols int `json:"cols,omitempty"`
+	Rows int `json:"rows,omitempty"`
 
 	// Agent-to-agent call fields
 	CallID string `json:"call_id,omitempty"`

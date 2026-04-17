@@ -4,13 +4,21 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/akemon/akemon-relay/internal/arena"
 	"github.com/akemon/akemon-relay/internal/config"
 	"github.com/akemon/akemon-relay/internal/relay"
 	"github.com/akemon/akemon-relay/internal/store"
+	"github.com/gorilla/websocket"
 )
+
+// terminalSession holds the browser-side WebSocket for a terminal proxy.
+type terminalSession struct {
+	browserConn *websocket.Conn
+	mu          sync.Mutex
+}
 
 type Server struct {
 	relay  *relay.Relay
@@ -18,16 +26,21 @@ type Server struct {
 	arena  *arena.Arena
 	mux    *http.ServeMux
 	limiter *rateLimiter
+
+	// Terminal proxy: agent name → browser WebSocket
+	termSessions map[string]*terminalSession
+	termMu       sync.RWMutex
 }
 
 func New(cfg *config.Config, st *store.Store) *Server {
 	r := relay.New(cfg, st)
 	s := &Server{
-		relay:   r,
-		config:  cfg,
-		arena:   arena.New(r.Registry, st),
-		mux:     http.NewServeMux(),
-		limiter: newRateLimiter(60, time.Second), // 60 requests/second per IP, 120 burst
+		relay:        r,
+		config:       cfg,
+		arena:        arena.New(r.Registry, st),
+		mux:          http.NewServeMux(),
+		limiter:      newRateLimiter(60, time.Second), // 60 requests/second per IP, 120 burst
+		termSessions: make(map[string]*terminalSession),
 	}
 	s.routes()
 	s.StartScheduler()
@@ -45,12 +58,16 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/call/{name}", s.handleSimpleCall)
 	s.mux.HandleFunc("POST /v1/call", s.handleFindAndCall)
 	s.mux.HandleFunc("GET /health", s.handleHealth)
+	s.mux.HandleFunc("GET /v1/auth/check", s.handleAuthCheck)
 	s.mux.HandleFunc("POST /v1/search-log", s.handleSearchLog)
 	s.mux.HandleFunc("GET /v1/agent/{name}/games", s.handleListGames)
 	s.mux.HandleFunc("GET /agent/{name}/games/{slug}", s.handleAgentGame)
 	s.mux.HandleFunc("POST /v1/agent/{name}/games/{slug}", s.handleUpsertGame)
 	s.mux.HandleFunc("DELETE /v1/agent/{name}/games/{slug}", s.handleDeleteGame)
 	s.mux.HandleFunc("GET /agent/{name}", s.handleAgentProfile)
+
+	// Terminal WebSocket proxy (browser → relay → agent PTY)
+	s.mux.HandleFunc("GET /v1/agent/{name}/terminal", s.handleTerminalWebSocket)
 
 	// Chat routes (proxy to agent's local conversation store)
 	s.mux.HandleFunc("GET /v1/agent/{name}/chat/mine", s.handleChatMine)

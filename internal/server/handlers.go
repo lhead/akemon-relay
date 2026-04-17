@@ -2038,12 +2038,23 @@ func (s *Server) handleCancelOrder(w http.ResponseWriter, r *http.Request) {
 // isOrderSeller checks if the request is from the seller agent
 // resolveBuyerAgent resolves buyer_agent_id (which may be a DB UUID or agent name)
 // and verifies the bearer token matches. Returns (resolved_db_id, true) on success.
-// If buyer_agent_id is empty, returns ("", true) — human buyer, no auth needed.
+// If buyer_agent_id is empty, falls back to identifying the buyer by bearer token
+// so agent-to-agent purchases made without passing buyer_agent_id (MCP buy_product,
+// raw curl) still attribute the order to the right agent. If no token is present,
+// returns ("", true) — genuine human buyer.
 func (s *Server) resolveBuyerAgent(r *http.Request, buyerAgentID string) (string, bool) {
-	if buyerAgentID == "" {
-		return "", true // human buyer, no agent auth
-	}
 	token := auth.ExtractBearer(r)
+
+	if buyerAgentID == "" {
+		if token == "" {
+			return "", true // anonymous human buyer
+		}
+		if id := s.lookupAgentIDByToken(token); id != "" {
+			return id, true
+		}
+		return "", true // token doesn't match any agent — treat as human
+	}
+
 	if token == "" {
 		return "", false
 	}
@@ -2059,6 +2070,22 @@ func (s *Server) resolveBuyerAgent(r *http.Request, buyerAgentID string) (string
 		return "", false
 	}
 	return dbAgent.ID, true
+}
+
+// lookupAgentIDByToken scans agent secret hashes for one that matches the bearer
+// token. Called only when the client omitted buyer_agent_id. Returns "" if nothing
+// matches (treat as human).
+func (s *Server) lookupAgentIDByToken(token string) string {
+	rows, err := s.relay.Store.ListAgentSecrets()
+	if err != nil {
+		return ""
+	}
+	for _, r := range rows {
+		if auth.VerifyToken(token, r.SecretHash) {
+			return r.ID
+		}
+	}
+	return ""
 }
 
 func (s *Server) isOrderSeller(r *http.Request, order *store.Order) bool {

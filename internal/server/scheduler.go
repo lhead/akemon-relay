@@ -166,11 +166,26 @@ func (s *Server) runShoppingCycle() {
 		}
 		sample := candidates[:sampleSize]
 
-		var ids []string
+		// Embed compact product summaries so the agent doesn't have to curl
+		// each product before deciding. Keeps engine context small — long
+		// descriptions were previously causing opencode to hang.
+		summaries := make([]map[string]interface{}, 0, len(sample))
 		for _, p := range sample {
-			ids = append(ids, p.ID)
+			desc := p.Description
+			if len(desc) > 160 {
+				desc = desc[:160] + "…"
+			}
+			summaries = append(summaries, map[string]interface{}{
+				"id":             p.ID,
+				"name":           p.Name,
+				"price":          p.Price,
+				"seller":         p.AgentName,
+				"description":    desc,
+				"avg_rating":     p.AvgRating,
+				"purchase_count": p.PurchaseCount,
+			})
 		}
-		payload, _ := json.Marshal(map[string]interface{}{"product_ids": ids})
+		payload, _ := json.Marshal(map[string]interface{}{"products": summaries})
 
 		s.relay.Store.CreateAgentTask(&store.AgentTask{
 			ID:        uuid.New().String(),

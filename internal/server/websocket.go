@@ -277,6 +277,9 @@ func (s *Server) agentLoop(agent *ConnectedAgent) {
 			case relay.TypeAgentCallResult:
 				// Agent returning result to a caller
 				s.routeAgentCallResult(agent, &msg)
+			case relay.TypeTerminalData, relay.TypeTerminalExit:
+				// Forward terminal output from agent to browser
+				s.forwardToTerminalBrowser(agent.Name, &msg)
 			default:
 				log.Printf("[ws] %s: unexpected message type: %s", agent.Name, msg.Type)
 			}

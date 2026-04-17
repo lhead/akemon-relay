@@ -402,6 +402,35 @@ func (s *Store) GetAgentByName(name string) (*Agent, error) {
 	return a, nil
 }
 
+// ListAgentSecrets returns (id, secret_hash) for every agent. Used to identify
+// an agent by bearer token when the caller did not pass buyer_agent_id.
+// Order-creation paths hit this at most once per request, and agent count stays small.
+func (s *Store) ListAgentSecrets() ([]struct {
+	ID         string
+	SecretHash string
+}, error) {
+	rows, err := s.db.Query(`SELECT id, secret_hash FROM agents WHERE secret_hash != ''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []struct {
+		ID         string
+		SecretHash string
+	}
+	for rows.Next() {
+		var r struct {
+			ID         string
+			SecretHash string
+		}
+		if err := rows.Scan(&r.ID, &r.SecretHash); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 func randomAvatar(engine string) string {
 	if engine == "human" {
 		return ""
