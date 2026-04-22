@@ -79,6 +79,40 @@ nav { position: sticky; top: 0; z-index: 100; background: rgba(255,255,255,0.85)
 /* Section label */
 .section-label { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 500; color: #808080; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 14px; }
 
+/* Tab bar */
+.tab-bar { display: flex; gap: 2px; margin-bottom: 24px; border-bottom: 1px solid #e5e5e5; padding-bottom: 0; }
+.tab-btn { padding: 8px 16px 9px; background: none; border: none; border-bottom: 2px solid transparent; font-size: 14px; font-weight: 500; color: #666; cursor: pointer; font-family: 'Inter', Arial, sans-serif; margin-bottom: -1px; transition: color 0.1s; }
+.tab-btn:hover { color: #171717; }
+.tab-btn.active { color: #171717; border-bottom-color: #171717; }
+
+/* Health tab */
+.health-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; margin-bottom: 32px; }
+.health-card { background: #fff; border-radius: 10px; box-shadow: rgba(0,0,0,0.08) 0px 0px 0px 1px, rgba(0,0,0,0.04) 0px 2px 2px; padding: 18px 20px; }
+.health-card-name { font-size: 14px; font-weight: 600; margin-bottom: 2px; }
+.health-card-meta { font-size: 12px; color: #888; margin-bottom: 14px; font-family: 'JetBrains Mono', monospace; }
+.health-gauges { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+.gauge { background: #fafafa; border-radius: 7px; padding: 8px 10px; }
+.gauge-value { font-size: 18px; font-weight: 600; letter-spacing: -0.5px; font-feature-settings: "tnum"; }
+.gauge-label { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 500; color: #aaa; text-transform: uppercase; letter-spacing: 0.04em; margin-top: 1px; }
+.gauge.warn .gauge-value { color: #f59e0b; }
+.gauge.alert .gauge-value { color: #ef4444; }
+.gauge-bar-wrap { height: 3px; background: #e5e5e5; border-radius: 2px; margin-top: 6px; }
+.gauge-bar { height: 3px; border-radius: 2px; background: #22c55e; transition: width 0.3s; }
+.gauge-bar.warn { background: #f59e0b; }
+.gauge-bar.alert { background: #ef4444; }
+
+/* Failure events feed */
+.events-feed { display: flex; flex-direction: column; gap: 0; }
+.event-row { display: flex; align-items: baseline; gap: 10px; padding: 8px 0; box-shadow: rgba(0,0,0,0.06) 0px -1px 0px; font-size: 13px; }
+.event-row:first-child { box-shadow: none; }
+.event-kind { display: inline-flex; padding: 1px 8px; border-radius: 9999px; font-size: 11px; font-weight: 600; background: #fee2e2; color: #b91c1c; white-space: nowrap; }
+.event-agent { font-weight: 600; color: #171717; flex-shrink: 0; }
+.event-label { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #555; flex-shrink: 0; }
+.event-msg { color: #666; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.event-time { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #aaa; white-space: nowrap; margin-left: auto; }
+.health-refresh { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #aaa; margin-bottom: 16px; }
+.health-empty { text-align: center; padding: 32px; color: #aaa; font-size: 14px; }
+
 /* Footer */
 .footer { margin-top: 48px; padding-top: 16px; box-shadow: rgba(0,0,0,0.08) 0px -1px 0px; text-align: center; font-size: 12px; color: #808080; padding-bottom: 16px; }
 
@@ -127,8 +161,25 @@ nav { position: sticky; top: 0; z-index: 100; background: rgba(255,255,255,0.85)
       <div class="dash-sub" id="dash-sub"></div>
       <div class="dash-stats" id="dash-stats"></div>
     </div>
-    <div class="section-label">Agents</div>
-    <div class="agents-grid" id="agents-grid"></div>
+
+    <div class="tab-bar">
+      <button class="tab-btn active" id="tab-agents-btn" onclick="switchTab('agents')">Agents</button>
+      <button class="tab-btn" id="tab-health-btn" onclick="switchTab('health')">Health</button>
+    </div>
+
+    <div id="tab-agents">
+      <div class="section-label">Agents</div>
+      <div class="agents-grid" id="agents-grid"></div>
+    </div>
+
+    <div id="tab-health" style="display:none">
+      <div class="health-refresh" id="health-refresh-ts"></div>
+      <div class="section-label">Live Gauges</div>
+      <div class="health-grid" id="health-grid"></div>
+      <div class="section-label" style="margin-top:16px">Failure Events (24 h)</div>
+      <div id="health-events"></div>
+    </div>
+
     <div class="footer">
       <a href="#" onclick="logout();return false" style="color:#e53e3e">Sign out</a>
     </div>
@@ -137,6 +188,141 @@ nav { position: sticky; top: 0; z-index: 100; background: rgba(255,255,255,0.85)
 
 <script>
 var EC = {claude:'#a78bfa',codex:'#4ade80',gemini:'#60a5fa',opencode:'#fb923c',human:'#fbbf24',aider:'#f472b6',raw:'#94a3b8'};
+var _healthTimer = null;
+var _currentTab = 'agents';
+
+function switchTab(tab) {
+  _currentTab = tab;
+  document.getElementById('tab-agents').style.display = tab === 'agents' ? '' : 'none';
+  document.getElementById('tab-health').style.display = tab === 'health' ? '' : 'none';
+  document.getElementById('tab-agents-btn').classList.toggle('active', tab === 'agents');
+  document.getElementById('tab-health-btn').classList.toggle('active', tab === 'health');
+  if (tab === 'health') {
+    loadHealth();
+    if (!_healthTimer) _healthTimer = setInterval(loadHealth, 30000);
+  } else {
+    if (_healthTimer) { clearInterval(_healthTimer); _healthTimer = null; }
+  }
+}
+
+function fmtUptime(ms) {
+  if (!ms) return '-';
+  var s = Math.floor(ms / 1000);
+  if (s < 60) return s + 's';
+  var m = Math.floor(s / 60);
+  if (m < 60) return m + 'm';
+  var h = Math.floor(m / 60);
+  if (h < 24) return h + 'h ' + (m % 60) + 'm';
+  return Math.floor(h / 24) + 'd ' + (h % 24) + 'h';
+}
+
+function fmtMs(ms) {
+  if (!ms && ms !== 0) return '-';
+  if (ms < 1000) return ms + 'ms';
+  return (ms / 1000).toFixed(1) + 's';
+}
+
+function avgMs(arr) {
+  if (!arr || !arr.length) return null;
+  return Math.round(arr.reduce(function(a, b) { return a + b; }, 0) / arr.length);
+}
+
+function gaugeHtml(value, label, max, unit) {
+  var pct = max > 0 ? Math.min(100, Math.round((value / max) * 100)) : 0;
+  var cls = pct >= 90 ? 'alert' : pct >= 60 ? 'warn' : '';
+  var barCls = cls;
+  return '<div class="gauge ' + cls + '">' +
+    '<div class="gauge-value">' + value + (unit || '') + '</div>' +
+    '<div class="gauge-label">' + label + '</div>' +
+    '<div class="gauge-bar-wrap"><div class="gauge-bar ' + barCls + '" style="width:' + pct + '%"></div></div>' +
+    '</div>';
+}
+
+function loadHealth() {
+  var accountId = getAccountId();
+  if (!accountId) return;
+  fetch('/v1/account/' + encodeURIComponent(accountId) + '/metrics', {signal: AbortSignal.timeout(10000)})
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var agents = data.agents || [];
+      var ts = new Date().toLocaleTimeString();
+      document.getElementById('health-refresh-ts').textContent = 'Last refreshed ' + ts + ' · auto-refresh every 30s';
+      renderHealthGauges(agents);
+      renderFailureEvents();
+    })
+    .catch(function(err) {
+      document.getElementById('health-refresh-ts').textContent = 'Failed to load: ' + (err.message || 'error');
+    });
+}
+
+function renderHealthGauges(agents) {
+  var h = '';
+  var online = agents.filter(function(a) { return a.online; });
+  if (!online.length) {
+    document.getElementById('health-grid').innerHTML = '<div class="health-empty">No agents online</div>';
+    return;
+  }
+  for (var i = 0; i < online.length; i++) {
+    var a = online[i];
+    var m = a.metrics || {};
+    var updAge = '';
+    if (a.metrics_updated_at) {
+      var secs = Math.round((Date.now() - new Date(a.metrics_updated_at).getTime()) / 1000);
+      updAge = secs + 's ago';
+    }
+    var avg = avgMs(m.engine_last_exec_ms);
+    h += '<div class="health-card">';
+    h += '<div class="health-card-name">' + esc(a.name) + '</div>';
+    h += '<div class="health-card-meta">';
+    h += 'up ' + fmtUptime(m.uptime_ms);
+    if (updAge) h += ' &nbsp;·&nbsp; metrics ' + updAge;
+    h += '</div>';
+    h += '<div class="health-gauges">';
+    h += gaugeHtml(m.engine_children_active || 0, 'Engine', 5, '');
+    h += gaugeHtml(m.engine_queue_depth || 0, 'Queue', 10, '');
+    h += gaugeHtml(m.task_executing || 0, 'Executing', 5, '');
+    h += gaugeHtml(m.task_pending_retries || 0, 'Retries', 20, '');
+    h += '<div class="gauge">';
+    h += '<div class="gauge-value">' + (avg !== null ? fmtMs(avg) : '-') + '</div>';
+    h += '<div class="gauge-label">Avg Exec</div>';
+    h += '</div>';
+    h += '<div class="gauge">';
+    h += '<div class="gauge-value">' + ((a.completed_24h || 0) + '<span style="font-size:12px;color:#aaa;font-weight:400">/' + (a.failed_24h || 0) + '</span>') + '</div>';
+    h += '<div class="gauge-label">Done/Fail 24h</div>';
+    h += '</div>';
+    h += '</div>';
+    h += '</div>';
+  }
+  document.getElementById('health-grid').innerHTML = h;
+}
+
+function renderFailureEvents() {
+  var accountId = getAccountId();
+  if (!accountId) return;
+  fetch('/v1/account/' + encodeURIComponent(accountId) + '/failure-events', {signal: AbortSignal.timeout(8000)})
+    .then(function(r) { return r.ok ? r.json() : []; })
+    .catch(function() { return []; })
+    .then(function(allEvents) {
+      if (!allEvents.length) {
+        document.getElementById('health-events').innerHTML = '<div class="health-empty">No failure events in the last 24h &#x2705;</div>';
+        return;
+      }
+      var h = '<div class="events-feed">';
+      for (var k = 0; k < Math.min(allEvents.length, 50); k++) {
+        var ev = allEvents[k];
+        var t = ev.created_at ? new Date(ev.created_at).toLocaleTimeString() : '';
+        h += '<div class="event-row">';
+        h += '<span class="event-kind">' + esc(ev.kind) + '</span>';
+        h += '<span class="event-agent">' + esc(ev.agent_name) + '</span>';
+        if (ev.label) h += '<span class="event-label">' + esc(ev.label) + '</span>';
+        if (ev.message) h += '<span class="event-msg">' + esc(ev.message) + '</span>';
+        h += '<span class="event-time">' + t + '</span>';
+        h += '</div>';
+      }
+      h += '</div>';
+      document.getElementById('health-events').innerHTML = h;
+    });
+}
 
 function esc(s) {
   if (!s) return '';

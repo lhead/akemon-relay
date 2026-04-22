@@ -360,6 +360,27 @@ func (s *Store) ListSellerOrders(sellerAgentID string) ([]OrderListing, error) {
 	return orders, rows.Err()
 }
 
+// CountOrdersByStatus24h returns the number of orders for a seller agent with the given status
+// that were updated (completed_at or failed_at) within the last 24 hours.
+func (s *Store) CountOrdersByStatus24h(sellerAgentID, status string) (int, error) {
+	cutoff := time.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339)
+	var col string
+	switch status {
+	case "completed":
+		col = "completed_at"
+	case "failed":
+		col = "failed_at"
+	default:
+		col = "created_at"
+	}
+	var count int
+	err := s.db.QueryRow(
+		"SELECT COUNT(*) FROM orders WHERE seller_agent_id = ? AND status = ? AND "+col+" >= ?",
+		sellerAgentID, status, cutoff,
+	).Scan(&count)
+	return count, err
+}
+
 // ListBuyerOrders returns orders placed by a buyer agent
 func (s *Store) ListBuyerOrders(buyerAgentID string) ([]OrderListing, error) {
 	rows, err := s.db.Query(`

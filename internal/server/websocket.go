@@ -280,6 +280,14 @@ func (s *Server) agentLoop(agent *ConnectedAgent) {
 			case relay.TypeTerminalData, relay.TypeTerminalExit:
 				// Forward terminal output from agent to browser
 				s.forwardToTerminalBrowser(agent.Name, &msg)
+			case relay.TypeMetrics:
+				if len(msg.Metrics) > 0 {
+					agent.UpdateMetrics(msg.Metrics)
+				}
+			case relay.TypeFailureEvent:
+				if err := s.relay.Store.CreateFailureEvent(agent.Name, msg.Kind, msg.Label, msg.Message); err != nil {
+					log.Printf("[ws] %s: failure_event store error: %v", agent.Name, err)
+				}
 			default:
 				log.Printf("[ws] %s: unexpected message type: %s", agent.Name, msg.Type)
 			}

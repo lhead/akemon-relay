@@ -126,6 +126,117 @@ func TestListProductsByAgent(t *testing.T) {
 	}
 }
 
+func TestGetProduct_NotFound(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	got, err := s.GetProduct("nonexistent-id")
+	if err != nil {
+		t.Fatalf("GetProduct error: %v", err)
+	}
+	if got != nil {
+		t.Errorf("expected nil for unknown product, got %+v", got)
+	}
+}
+
+func TestUpdateProduct_NotFound(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	// TODO: buggy behavior — UpdateProduct on a non-existent ID returns nil error with 0 rows
+	// affected; caller cannot distinguish "updated" from "not found". Should return an error or
+	// expose rows-affected.
+	err := s.UpdateProduct("nonexistent-id", "Name", "Desc", "", "", 1)
+	if err != nil {
+		t.Errorf("UpdateProduct on non-existent ID returned unexpected error: %v", err)
+	}
+}
+
+func TestDeleteProduct_NotFound(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	err := s.DeleteProduct("nonexistent-id")
+	if err != nil {
+		t.Errorf("DeleteProduct on non-existent ID returned unexpected error: %v", err)
+	}
+}
+
+func TestListProductsByAgent_Empty(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	a := makeAgent("empty-seller", "claude", true)
+	ensureAgentAccount(t, s, a)
+	if err := s.CreateAgent(a); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+
+	products, err := s.ListProductsByAgent(a.ID)
+	if err != nil {
+		t.Fatalf("ListProductsByAgent: %v", err)
+	}
+	if len(products) != 0 {
+		t.Errorf("want empty slice, got %d products", len(products))
+	}
+}
+
+func TestCreateProduct_DetailHTMLRoundtrip(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	a := makeAgent("html-seller", "claude", true)
+	ensureAgentAccount(t, s, a)
+	if err := s.CreateAgent(a); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+
+	p := makeProduct(a.ID, "HTML Product", 10)
+	p.DetailHTML = "<h1>Hello</h1><p>Rich content</p>"
+	if err := s.CreateProduct(p); err != nil {
+		t.Fatalf("CreateProduct: %v", err)
+	}
+
+	got, err := s.GetProduct(p.ID)
+	if err != nil {
+		t.Fatalf("GetProduct: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected product, got nil")
+	}
+	if got.DetailHTML != p.DetailHTML {
+		t.Errorf("detail_html: want %q, got %q", p.DetailHTML, got.DetailHTML)
+	}
+}
+
+// TestCreateReview_BeforeOrderCompleted is intentionally omitted:
+// CreateReview has no validation that the associated order is in 'completed' status.
+// NOTE: no status check on order — any order_id can receive a review; recommend adding a guard.
+
+func TestListProductReviews_Empty(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	a := makeAgent("no-review-seller", "claude", true)
+	ensureAgentAccount(t, s, a)
+	if err := s.CreateAgent(a); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+
+	p := makeProduct(a.ID, "Unreviewed Product", 5)
+	if err := s.CreateProduct(p); err != nil {
+		t.Fatalf("CreateProduct: %v", err)
+	}
+
+	reviews, err := s.ListProductReviews(p.ID)
+	if err != nil {
+		t.Fatalf("ListProductReviews: %v", err)
+	}
+	if len(reviews) != 0 {
+		t.Errorf("want empty slice, got %d reviews", len(reviews))
+	}
+}
+
 func TestSubmitAndListReview(t *testing.T) {
 	s, cleanup := setupTestStore(t)
 	defer cleanup()

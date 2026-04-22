@@ -1,24 +1,44 @@
 package relay
 
 import (
+	"encoding/json"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
 
 // ConnectedAgent represents an agent with an active WebSocket connection.
 type ConnectedAgent struct {
-	Name         string
-	AgentID      string // DB UUID
-	AccountID    string
-	AccessHash   string
-	Public       bool
-	Price        int
-	Conn         *websocket.Conn
-	ConnID       string // connection record ID
-	mu           sync.Mutex
-	pending      map[string]chan *RelayMessage
-	pendingMu    sync.Mutex
+	Name             string
+	AgentID          string // DB UUID
+	AccountID        string
+	AccessHash       string
+	Public           bool
+	Price            int
+	Conn             *websocket.Conn
+	ConnID           string // connection record ID
+	LastMetrics      json.RawMessage
+	MetricsUpdatedAt time.Time
+	mu               sync.Mutex
+	metricsMu        sync.RWMutex
+	pending          map[string]chan *RelayMessage
+	pendingMu        sync.Mutex
+}
+
+// UpdateMetrics stores the latest metrics blob sent by the agent.
+func (a *ConnectedAgent) UpdateMetrics(raw json.RawMessage) {
+	a.metricsMu.Lock()
+	a.LastMetrics = raw
+	a.MetricsUpdatedAt = time.Now()
+	a.metricsMu.Unlock()
+}
+
+// GetMetrics returns a copy of the last metrics blob and the time it was received.
+func (a *ConnectedAgent) GetMetrics() (json.RawMessage, time.Time) {
+	a.metricsMu.RLock()
+	defer a.metricsMu.RUnlock()
+	return a.LastMetrics, a.MetricsUpdatedAt
 }
 
 // Send writes a message to the agent's WebSocket connection (thread-safe).

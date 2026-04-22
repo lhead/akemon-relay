@@ -24,6 +24,10 @@ const (
 	TypeTerminalResize = "terminal_resize"
 	TypeTerminalStop   = "terminal_stop"
 	TypeTerminalExit   = "terminal_exit"
+
+	// Observability
+	TypeMetrics      = "metrics"
+	TypeFailureEvent = "failure_event"
 )
 
 // RelayMessage is the envelope for all WebSocket communication.
@@ -73,4 +77,10 @@ type RelayMessage struct {
 	Caller string `json:"caller,omitempty"` // caller agent name (set by relay)
 	Task   string `json:"task,omitempty"`
 	Result string `json:"result,omitempty"`
+
+	// Observability fields
+	Metrics json.RawMessage `json:"metrics,omitempty"` // AgentMetrics JSON blob (type=metrics)
+	Kind    string          `json:"kind,omitempty"`    // failure_event category
+	Label   string          `json:"label,omitempty"`   // failure_event label
+	Message string          `json:"message,omitempty"` // failure_event message
 }

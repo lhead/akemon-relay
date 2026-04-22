@@ -220,3 +220,66 @@ func TestExtendOrderTimeout(t *testing.T) {
 		t.Errorf("timeout_at should increase after extend: before=%s after=%s", before.TimeoutAt, after.TimeoutAt)
 	}
 }
+
+func TestCountOrdersByStatus24h(t *testing.T) {
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	seller, buyer := setupTwoAgents(t, s)
+
+	// Zero count before any orders
+	n, err := s.CountOrdersByStatus24h(seller.ID, "completed")
+	if err != nil {
+		t.Fatalf("CountOrdersByStatus24h: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("expected 0 completed orders, got %d", n)
+	}
+
+	// Create an order and mark it completed
+	o := makeOrder(seller, buyer)
+	if err := s.CreateOrder(o); err != nil {
+		t.Fatalf("CreateOrder: %v", err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := s.db.Exec(`UPDATE orders SET status='completed', completed_at=? WHERE id=?`, now, o.ID); err != nil {
+		t.Fatalf("update order status: %v", err)
+	}
+
+	n, err = s.CountOrdersByStatus24h(seller.ID, "completed")
+	if err != nil {
+		t.Fatalf("CountOrdersByStatus24h after complete: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("expected 1 completed order, got %d", n)
+	}
+
+	// Failed orders should still be 0
+	nf, err := s.CountOrdersByStatus24h(seller.ID, "failed")
+	if err != nil {
+		t.Fatalf("CountOrdersByStatus24h failed: %v", err)
+	}
+	if nf != 0 {
+		t.Errorf("expected 0 failed orders, got %d", nf)
+	}
+
+	// An order with a completed_at older than 24h should not be counted
+	o2 := makeOrder(seller, buyer)
+	o2.ID = uuid.New().String()
+	if err := s.CreateOrder(o2); err != nil {
+		t.Fatalf("CreateOrder o2: %v", err)
+	}
+	old := time.Now().UTC().Add(-25 * time.Hour).Format(time.RFC3339)
+	if _, err := s.db.Exec(`UPDATE orders SET status='completed', completed_at=? WHERE id=?`, old, o2.ID); err != nil {
+		t.Fatalf("update order status o2: %v", err)
+	}
+
+	n2, err := s.CountOrdersByStatus24h(seller.ID, "completed")
+	if err != nil {
+		t.Fatalf("CountOrdersByStatus24h with old order: %v", err)
+	}
+	if n2 != 1 {
+		t.Errorf("old order should not be counted: expected 1, got %d", n2)
+	}
+}
+

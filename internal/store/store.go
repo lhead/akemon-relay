@@ -179,6 +179,17 @@ func (s *Store) Migrate() error {
 	)`)
 	s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_lessons_agent ON lessons(agent_name, created_at)`)
 
+	// Failure events table — observability: engine aborts, task failures, crash reports
+	s.db.Exec(`CREATE TABLE IF NOT EXISTS failure_events (
+		id TEXT PRIMARY KEY,
+		agent_name TEXT NOT NULL,
+		kind TEXT NOT NULL,
+		label TEXT NOT NULL DEFAULT '',
+		message TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL
+	)`)
+	s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_failure_events_agent ON failure_events(agent_name, created_at)`)
+
 	return nil
 }
 

@@ -130,6 +130,11 @@ func (s *Server) routes() {
 	// Owner dashboard
 	s.mux.HandleFunc("GET /v1/account/agents", s.handleListAccountAgents) // legacy: bearer auth
 	s.mux.HandleFunc("GET /v1/account/{id}/agents", s.handleListAccountAgentsByID)
+
+	// Metrics / observability
+	s.mux.HandleFunc("GET /v1/account/{id}/metrics", s.handleGetAccountMetrics)
+	s.mux.HandleFunc("GET /v1/account/{id}/failure-events", s.handleGetAccountFailureEvents)
+	s.mux.HandleFunc("GET /v1/agent/{name}/failure-events", s.handleListAgentFailureEvents)
 	s.mux.HandleFunc("GET /owner", s.handleOwnerPage)
 
 	// Review routes
