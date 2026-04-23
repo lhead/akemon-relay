@@ -20,6 +20,13 @@ type terminalSession struct {
 	mu          sync.Mutex
 }
 
+type taskStreamSession struct {
+	agentName   string
+	taskID      string
+	browserConn *websocket.Conn
+	mu          sync.Mutex
+}
+
 type Server struct {
 	relay  *relay.Relay
 	config *config.Config
@@ -30,6 +37,10 @@ type Server struct {
 	// Terminal proxy: agent name → browser WebSocket
 	termSessions map[string]*terminalSession
 	termMu       sync.RWMutex
+
+	// Live task stream proxy: task id → browser WebSocket
+	taskSessions map[string]*taskStreamSession
+	taskMu       sync.RWMutex
 }
 
 func New(cfg *config.Config, st *store.Store) *Server {
@@ -41,6 +52,7 @@ func New(cfg *config.Config, st *store.Store) *Server {
 		mux:          http.NewServeMux(),
 		limiter:      newRateLimiter(60, time.Second), // 60 requests/second per IP, 120 burst
 		termSessions: make(map[string]*terminalSession),
+		taskSessions: make(map[string]*taskStreamSession),
 	}
 	s.routes()
 	s.StartScheduler()
@@ -68,6 +80,8 @@ func (s *Server) routes() {
 
 	// Terminal WebSocket proxy (browser → relay → agent PTY)
 	s.mux.HandleFunc("GET /v1/agent/{name}/terminal", s.handleTerminalWebSocket)
+	s.mux.HandleFunc("GET /v1/live/task/{task_id}/stream", s.handleLiveTaskWebSocket)
+	s.mux.HandleFunc("GET /v1/agent/{name}/live-tasks", s.handleListLiveTasks)
 
 	// Chat routes (proxy to agent's local conversation store)
 	s.mux.HandleFunc("GET /v1/agent/{name}/chat/mine", s.handleChatMine)

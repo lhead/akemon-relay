@@ -27,7 +27,14 @@ func buildTestServer(t *testing.T) (*Server, *store.Store, func()) {
 	}
 	cfg := config.Default()
 	r := relay.New(cfg, st)
-	srv := &Server{relay: r, config: cfg, limiter: newRateLimiter(60, time.Second)}
+	srv := &Server{
+		relay:        r,
+		config:       cfg,
+		limiter:      newRateLimiter(60, time.Second),
+		mux:          http.NewServeMux(),
+		termSessions: make(map[string]*terminalSession),
+		taskSessions: make(map[string]*taskStreamSession),
+	}
 	return srv, st, func() { db.Close() }
 }
 

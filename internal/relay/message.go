@@ -25,6 +25,11 @@ const (
 	TypeTerminalStop   = "terminal_stop"
 	TypeTerminalExit   = "terminal_exit"
 
+	// Task streaming (subprocess stdio)
+	TypeTaskStart  = "task_start"
+	TypeTaskStream = "task_stream"
+	TypeTaskEnd    = "task_end"
+
 	// Observability
 	TypeMetrics      = "metrics"
 	TypeFailureEvent = "failure_event"
@@ -70,6 +75,15 @@ type RelayMessage struct {
 	// Terminal fields
 	Cols int `json:"cols,omitempty"`
 	Rows int `json:"rows,omitempty"`
+
+	// Task stream fields
+	TaskID     string `json:"task_id,omitempty"`
+	Origin     string `json:"origin,omitempty"`
+	Cmd        string `json:"cmd,omitempty"`
+	Stream     string `json:"stream,omitempty"`
+	Chunk      string `json:"chunk,omitempty"`
+	ExitCode   *int   `json:"exit_code,omitempty"`
+	DurationMs int64  `json:"duration_ms,omitempty"`
 
 	// Agent-to-agent call fields
 	CallID string `json:"call_id,omitempty"`

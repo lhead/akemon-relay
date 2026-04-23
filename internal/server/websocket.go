@@ -280,6 +280,14 @@ func (s *Server) agentLoop(agent *ConnectedAgent) {
 			case relay.TypeTerminalData, relay.TypeTerminalExit:
 				// Forward terminal output from agent to browser
 				s.forwardToTerminalBrowser(agent.Name, &msg)
+			case relay.TypeTaskStart:
+				agent.StartTaskStream(msg.TaskID, msg.Origin, msg.Cmd)
+			case relay.TypeTaskStream:
+				agent.AppendTaskChunk(msg.TaskID, msg.Stream, msg.Chunk)
+				s.forwardToTaskBrowser(agent.Name, &msg)
+			case relay.TypeTaskEnd:
+				agent.EndTaskStream(msg.TaskID, msg.ExitCode, msg.DurationMs)
+				s.forwardToTaskBrowser(agent.Name, &msg)
 			case relay.TypeMetrics:
 				if len(msg.Metrics) > 0 {
 					agent.UpdateMetrics(msg.Metrics)
