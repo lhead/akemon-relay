@@ -54,6 +54,15 @@ nav { position: sticky; top: 0; z-index: 100; background: rgba(255,255,255,0.85)
 .tab-panel { display: none; margin-top: 28px; }
 .tab-panel.active { display: block; }
 
+/* xterm.js — restore content-box (global reset breaks viewport sizing) */
+#terminal-container .xterm,
+#terminal-container .xterm-viewport,
+#terminal-container .xterm-screen,
+#terminal-container .xterm-helper-textarea,
+#terminal-container .xterm-rows,
+#terminal-container .xterm-char-measure-element { box-sizing: content-box !important; }
+#terminal-container .xterm { padding: 4px; height: 100%; }
+
 /* Card */
 .card { background: #fff; border-radius: 8px; box-shadow: rgba(0,0,0,0.08) 0px 0px 0px 1px, rgba(0,0,0,0.04) 0px 2px 2px, #fafafa 0px 0px 0px 1px inset; }
 
@@ -466,7 +475,7 @@ function renderPage(a) {
     h += '<button onclick="applyAccessKey()" style="padding:6px 12px;border:1px solid rgba(0,0,0,0.1);border-radius:6px;font-size:12px;font-weight:500;background:#fff;cursor:pointer;font-family:\'Inter\',sans-serif">Unlock</button>';
     h += '</div>';
   }
-  h += '<div class="chat-input-row">';
+  h += '<div class="chat-input-row" id="chat-input-row">';
   h += '<textarea id="chat-input" placeholder="Send a message..." rows="1"' + (off || !a.public ? ' disabled' : '') + '></textarea>';
   h += '<button class="chat-send" id="chat-send" onclick="sendChat()"' + (off || !a.public ? ' disabled' : '') + '>Send</button>';
   h += '</div>';
@@ -643,6 +652,8 @@ function loadLibrary() {
 
 var chatConvId = null;
 var chatSending = false;
+var myConvId = null;  // Current user's own conversation ID
+var isOwnConv = true; // Whether the opened conversation is the user's own
 
 function unlockChatUI() {
   var row = document.getElementById('chat-access-row');
@@ -662,6 +673,19 @@ function showAccessKeyRow() {
   if (cb) cb.disabled = true;
 }
 
+function updateChatInputState() {
+  var row = document.getElementById('chat-input-row');
+  var ci = document.getElementById('chat-input');
+  var cb = document.getElementById('chat-send');
+  if (!row || !ci || !cb) return;
+  // Hide entirely when not in own conversation (list view, or other user's conv)
+  row.style.display = isOwnConv ? '' : 'none';
+  // Within own conversation, disable if agent offline
+  var shouldDisable = !cur || cur.status === 'offline';
+  ci.disabled = shouldDisable;
+  cb.disabled = shouldDisable;
+}
+
 function loadChat() {
   var sec = document.getElementById('chat-messages');
   if (!sec) return;
@@ -675,10 +699,14 @@ function loadChat() {
       sec.innerHTML = '<div class="empty-state">This agent is private. Enter an access key to chat.</div>';
       return null;
     }
+    // Relay exposes the resolved conv id via X-Conv-Id so the frontend can
+    // match list entries (agent body itself doesn't include the id field).
+    myConvId = r.headers.get('X-Conv-Id');
     return r.ok ? r.json() : null;
   })
   .then(function(data) {
     if (data === null) return;
+    isOwnConv = true;
     unlockChatUI();
     if (!data || (!data.rounds.length && !data.summary)) {
       sec.innerHTML = '<div class="empty-state">No conversation yet. Send a message to start.</div>'
@@ -686,6 +714,7 @@ function loadChat() {
       return;
     }
     renderChat(data);
+    updateChatInputState();
   })
   .catch(function() {
     sec.innerHTML = '<div class="empty-state">Could not load chat. Agent may be offline.</div>';
@@ -695,13 +724,26 @@ function loadChat() {
 function loadAllConvs() {
   var sec = document.getElementById('chat-messages');
   if (!sec) return;
+  // List view — no active conversation, hide input row
+  isOwnConv = false;
+  chatConvId = null;
+  updateChatInputState();
   sec.innerHTML = '<div class="empty-state">Loading...</div>';
 
   authFetch('/v1/agent/' + encodeURIComponent(AGENT_NAME) + '/chat/history')
-  .then(function(r) { return r.ok ? r.json() : []; })
+  .then(function(r) {
+    if (r.status === 401 || r.status === 403) {
+      sec.innerHTML = '<div class="empty-state">Only the agent owner can view all conversations.'
+        + '<div style="margin-top:8px"><button class="chat-back" onclick="loadChat()">&larr; Back to my conversation</button></div></div>';
+      return null;
+    }
+    return r.ok ? r.json() : [];
+  })
   .then(function(list) {
+    if (list === null) return;
     if (!list || !list.length) {
-      sec.innerHTML = '<div class="empty-state">No conversations.</div>';
+      sec.innerHTML = '<div class="empty-state">No conversations.'
+        + '<div style="margin-top:8px"><button class="chat-back" onclick="loadChat()">&larr; Back to my conversation</button></div></div>';
       return;
     }
     renderConvList(list);
@@ -714,7 +756,7 @@ function loadAllConvs() {
 function renderConvList(list) {
   var sec = document.getElementById('chat-messages');
   if (!sec) return;
-  var h = '';
+  var h = '<div><button class="chat-back" onclick="loadChat()">&larr; My conversation</button></div>';
   list.forEach(function(c) {
     var label = c.id.replace(/^pub_/, '').replace(/^ses_/, 'session:');
     h += '<div class="chat-conv-item" onclick="openConv(\'' + esc(c.id) + '\')">';
@@ -727,11 +769,15 @@ function renderConvList(list) {
 
 function openConv(id) {
   chatConvId = id;
+  isOwnConv = (id === myConvId);
   var sec = document.getElementById('chat-messages');
   if (sec) sec.innerHTML = '<div class="empty-state">Loading...</div>';
   authFetch('/v1/agent/' + encodeURIComponent(AGENT_NAME) + '/chat/' + encodeURIComponent(id))
   .then(function(r) { return r.json(); })
-  .then(function(data) { renderChat(data); })
+  .then(function(data) {
+    renderChat(data);
+    updateChatInputState();
+  })
   .catch(function() {
     if (sec) sec.innerHTML = '<div class="empty-state">Could not load conversation.</div>';
   });
@@ -740,7 +786,14 @@ function openConv(id) {
 function renderChat(data) {
   var sec = document.getElementById('chat-messages');
   if (!sec) return;
-  var h = '<div style="display:flex;justify-content:space-between;align-items:center"><button class="chat-back" onclick="loadChat()">&larr; My conversation</button><button class="chat-back" onclick="loadAllConvs()">All conversations</button></div>';
+  var h;
+  if (isOwnConv) {
+    // My own conversation — show "All conversations" link (owner only; others get denied)
+    h = '<div style="display:flex;justify-content:flex-end"><button class="chat-back" onclick="loadAllConvs()">All conversations</button></div>';
+  } else {
+    // Viewing someone else's conversation (owner mode) — show back link only
+    h = '<div><button class="chat-back" onclick="loadAllConvs()">&larr; Back to list</button></div>';
+  }
 
   // Summary block
   if (data.summary) {
@@ -781,7 +834,7 @@ function renderChat(data) {
 }
 
 function sendChat() {
-  if (!cur || chatSending) return;
+  if (!cur || chatSending || !isOwnConv) return;
   var inp = document.getElementById('chat-input');
   var msg = inp.value.trim();
   if (!msg) return;
@@ -901,7 +954,11 @@ function connectTerminal() {
   termFitAddon = new FitAddon.FitAddon();
   term.loadAddon(termFitAddon);
   term.open(container);
-  termFitAddon.fit();
+  // Defer fit to next frame so layout completes before measuring
+  requestAnimationFrame(function() {
+    try { termFitAddon.fit(); } catch(e) {}
+    term.focus();
+  });
 
   var btn = document.getElementById('term-connect-btn');
   btn.textContent = 'Connecting...';
@@ -922,7 +979,8 @@ function connectTerminal() {
       var msg = JSON.parse(e.data);
       if (msg.type === 'terminal_data' && msg.body) term.write(msg.body);
       if (msg.type === 'terminal_exit') {
-        term.write('\r\n\x1b[31mTerminal session ended.\x1b[0m\r\n');
+        var reason = msg.error ? msg.error : 'Terminal session ended.';
+        term.write('\r\n\x1b[31m' + reason + '\x1b[0m\r\n');
         disconnectTerminal();
       }
     } catch(ex) {}
