@@ -27,6 +27,16 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+// NewFromDB wraps an existing *sql.DB (useful for testing with in-memory databases).
+func NewFromDB(db *sql.DB) *Store {
+	return &Store{db: db}
+}
+
+// DB returns the underlying *sql.DB. Intended for tests that need direct SQL access.
+func (s *Store) DB() *sql.DB {
+	return s.db
+}
+
 func (s *Store) Migrate() error {
 	if _, err := s.db.Exec(schema); err != nil {
 		return err
@@ -189,6 +199,47 @@ func (s *Store) Migrate() error {
 		created_at TEXT NOT NULL
 	)`)
 	s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_failure_events_agent ON failure_events(agent_name, created_at)`)
+
+	// Phase A identity model: publishers / device_tokens / sessions
+	s.db.Exec(`CREATE TABLE IF NOT EXISTS publishers (
+		id          TEXT PRIMARY KEY,
+		account_id  TEXT UNIQUE NOT NULL,
+		display_name TEXT DEFAULT '',
+		created_at  INTEGER NOT NULL DEFAULT 0
+	)`)
+	s.db.Exec(`CREATE TABLE IF NOT EXISTS device_tokens (
+		id           TEXT PRIMARY KEY,
+		publisher_id TEXT NOT NULL REFERENCES publishers(id),
+		token_hash   TEXT NOT NULL,
+		device_name  TEXT DEFAULT '',
+		created_at   INTEGER NOT NULL DEFAULT 0,
+		last_used_at INTEGER,
+		last_used_ip TEXT DEFAULT '',
+		expires_at   INTEGER,
+		revoked_at   INTEGER
+	)`)
+	s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_device_tokens_hash ON device_tokens(token_hash) WHERE revoked_at IS NULL`)
+	s.db.Exec(`CREATE TABLE IF NOT EXISTS sessions (
+		id           TEXT PRIMARY KEY,
+		publisher_id TEXT NOT NULL REFERENCES publishers(id),
+		token_hash   TEXT NOT NULL,
+		created_at   INTEGER NOT NULL DEFAULT 0,
+		expires_at   INTEGER NOT NULL DEFAULT 0,
+		revoked_at   INTEGER,
+		user_agent   TEXT DEFAULT '',
+		last_used_at INTEGER
+	)`)
+	s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_sessions_hash ON sessions(token_hash) WHERE revoked_at IS NULL`)
+	s.db.Exec(`ALTER TABLE agents ADD COLUMN publisher_id TEXT DEFAULT ''`)
+	s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_agents_publisher ON agents(publisher_id)`)
+	s.db.Exec(`ALTER TABLE orders ADD COLUMN buyer_publisher_id TEXT DEFAULT ''`)
+	s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_orders_buyer_pub ON orders(buyer_publisher_id)`)
+	s.db.Exec(`ALTER TABLE orders ADD COLUMN buyer_name TEXT DEFAULT ''`)
+
+	// Run one-time identity phase A data migration (idempotent)
+	if err := s.MigrateIdentityPhaseA(); err != nil {
+		log.Printf("[migrate] identity phase A warning: %v", err)
+	}
 
 	return nil
 }
@@ -480,6 +531,8 @@ type Order struct {
 	SellerAgentID   string `json:"seller_agent_id"`
 	SellerAgentName string `json:"seller_agent_name"`
 	BuyerAgentID    string `json:"buyer_agent_id,omitempty"`
+	BuyerPublisherID string `json:"buyer_publisher_id,omitempty"`
+	BuyerName       string `json:"buyer_name,omitempty"`
 	BuyerIP         string `json:"buyer_ip,omitempty"`
 	BuyerTask       string `json:"buyer_task,omitempty"`
 	ParentOrderID   string `json:"parent_order_id,omitempty"`
@@ -537,14 +590,15 @@ type AgentTask struct {
 // CountPendingTasks returns how many pending tasks an agent has (to avoid duplicates)
 
 type OrderListing struct {
-	ID              string `json:"id"`
-	ProductID       string `json:"product_id"`
-	ProductName     string `json:"product_name"`
-	SellerName      string `json:"seller_name"`
-	SellerAvatar    string `json:"seller_avatar"`
-	BuyerAgentID    string `json:"buyer_agent_id,omitempty"`
-	BuyerName       string `json:"buyer_name,omitempty"`
-	BuyerIP         string `json:"buyer_ip,omitempty"`
+	ID               string `json:"id"`
+	ProductID        string `json:"product_id"`
+	ProductName      string `json:"product_name"`
+	SellerName       string `json:"seller_name"`
+	SellerAvatar     string `json:"seller_avatar"`
+	BuyerAgentID     string `json:"buyer_agent_id,omitempty"`
+	BuyerPublisherID string `json:"buyer_publisher_id,omitempty"`
+	BuyerName        string `json:"buyer_name,omitempty"`
+	BuyerIP          string `json:"buyer_ip,omitempty"`
 	BuyerTask       string `json:"buyer_task,omitempty"`
 	ParentOrderID   string `json:"parent_order_id,omitempty"`
 	Deposit         int    `json:"deposit"`

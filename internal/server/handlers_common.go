@@ -314,63 +314,37 @@ func (s *Server) applyTaskResult(dbAgent *store.Agent, taskType, result string) 
 // --- Auth Check ---
 
 func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
-	token := auth.ExtractBearer(r)
-	if token == "" {
-		// Not logged in — return anonymous identity from IP
-		pubID := derivePublisherID(r)
-		w.Header().Set("Content-Type", "application/json")
+	caller := s.ResolveCaller(r)
+	w.Header().Set("Content-Type", "application/json")
+
+	if caller.Kind != "owner" {
+		// Anonymous — no id leakage so the UI doesn't mistake this for a logged-in state.
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"role": "anonymous",
-			"id":   pubID,
 		})
 		return
 	}
 
-	pubID := func() string {
-		h := sha256.Sum256([]byte(token))
-		return fmt.Sprintf("%x", h[:6])
-	}()
-
-	// Check if token matches any agent's secret key
-	allAgents, err := s.relay.Store.ListAgents()
-	if err != nil {
-		jsonError(w, "internal error", http.StatusInternalServerError)
-		return
+	pub, _ := s.relay.Store.GetPublisher(caller.PublisherID)
+	accountID := caller.PublisherID
+	displayID := caller.PublisherID
+	if pub != nil {
+		accountID = pub.AccountID
+		if pub.AccountID != "" {
+			displayID = pub.AccountID
+		}
 	}
 
-	var accountID string
+	acctAgents, _ := s.relay.Store.ListAgentsByAccount(caller.PublisherID)
 	var ownedAgents []string
-	for _, a := range allAgents {
-		agent, err := s.relay.Store.GetAgentByName(a.Name)
-		if err != nil || agent == nil {
-			continue
-		}
-		if auth.VerifyToken(token, agent.SecretHash) {
-			accountID = agent.AccountID
-			break
-		}
+	for _, a := range acctAgents {
+		ownedAgents = append(ownedAgents, a.Name)
 	}
 
-	if accountID != "" {
-		// Owner — list all agents under this account
-		acctAgents, _ := s.relay.Store.ListAgentsByAccount(accountID)
-		for _, a := range acctAgents {
-			ownedAgents = append(ownedAgents, a.Name)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"role":       "owner",
-			"id":         pubID,
-			"account_id": accountID,
-			"agents":     ownedAgents,
-		})
-		return
-	}
-
-	// Valid token but not an owner — regular user
-	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"role": "user",
-		"id":   pubID,
+		"role":       "owner",
+		"id":         displayID,
+		"account_id": accountID,
+		"agents":     ownedAgents,
 	})
 }

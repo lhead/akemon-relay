@@ -237,20 +237,38 @@ func (s *Server) handleCreateAdHocOrder(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Verify buyer identity if agent-to-agent
-	resolvedBuyerID, ok := s.resolveBuyerAgent(r, req.BuyerAgentID)
-	if !ok {
-		jsonError(w, "unauthorized: buyer_agent_id does not match bearer token", http.StatusUnauthorized)
-		return
-	}
-
 	// Use agent's default price if no offer price
 	price := req.OfferPrice
 	if price <= 0 {
 		price = targetAgent.Price
 	}
 
-	// Determine human_origin: direct human request (no buyer agent) or inherited from parent
+	// Determine buyer identity (Bug 1 fix):
+	//   - explicit buyer_agent_id → agent-to-agent path (lookupAgentIDByToken only here)
+	//   - no buyer_agent_id + authenticated owner → human publisher path
+	//   - no buyer_agent_id + anonymous → IP fingerprint path
+	caller := s.ResolveCaller(r)
+	var resolvedBuyerID, buyerPublisherID, buyerName, buyerIP string
+
+	if req.BuyerAgentID != "" {
+		var ok bool
+		resolvedBuyerID, ok = s.resolveBuyerAgent(r, req.BuyerAgentID)
+		if !ok {
+			jsonError(w, "unauthorized: buyer_agent_id does not match bearer token", http.StatusUnauthorized)
+			return
+		}
+		buyerIP = derivePublisherID(r)
+	} else if caller.Kind == "owner" {
+		buyerPublisherID = caller.PublisherID
+		if pub, _ := s.relay.Store.GetPublisher(caller.PublisherID); pub != nil {
+			buyerName = pub.DisplayName
+		}
+		buyerIP = caller.PublisherID // publisherID as conv bucket key (aligns with MCP chat path)
+	} else {
+		buyerIP = derivePublisherID(r)
+	}
+
+	// Determine human_origin
 	humanOrigin := resolvedBuyerID == ""
 	if !humanOrigin && req.ParentOrderID != "" {
 		if parent, _ := s.relay.Store.GetOrder(req.ParentOrderID); parent != nil && parent.HumanOrigin {
@@ -260,16 +278,18 @@ func (s *Server) handleCreateAdHocOrder(w http.ResponseWriter, r *http.Request) 
 
 	orderID := uuid.New().String()
 	order := &store.Order{
-		ID:              orderID,
-		SellerAgentID:   targetAgent.ID,
-		SellerAgentName: targetAgent.Name,
-		BuyerAgentID:    resolvedBuyerID,
-		BuyerIP:         derivePublisherID(r),
-		BuyerTask:       req.Task,
-		ParentOrderID:   req.ParentOrderID,
-		TotalPrice:      price,
-		OfferPrice:      price,
-		HumanOrigin:     humanOrigin,
+		ID:               orderID,
+		SellerAgentID:    targetAgent.ID,
+		SellerAgentName:  targetAgent.Name,
+		BuyerAgentID:     resolvedBuyerID,
+		BuyerPublisherID: buyerPublisherID,
+		BuyerName:        buyerName,
+		BuyerIP:          buyerIP,
+		BuyerTask:        req.Task,
+		ParentOrderID:    req.ParentOrderID,
+		TotalPrice:       price,
+		OfferPrice:       price,
+		HumanOrigin:      humanOrigin,
 	}
 	if err := s.relay.Store.CreateOrder(order); err != nil {
 		jsonError(w, "internal error", http.StatusInternalServerError)

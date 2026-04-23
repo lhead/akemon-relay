@@ -44,7 +44,7 @@ func (s *Store) ListProductReviews(productID string) ([]Review, error) {
 func (s *Store) ListUnreviewedOrders(buyerName string) ([]OrderListing, error) {
 	rows, err := s.db.Query(`
 		SELECT o.id, COALESCE(o.product_id, ''), COALESCE(p.name, ''), COALESCE(seller.name, o.seller_agent_name), COALESCE(seller.avatar, ''),
-		       COALESCE(o.buyer_agent_id, ''), COALESCE(buyer.name, ''), COALESCE(o.buyer_ip, ''),
+		       COALESCE(o.buyer_agent_id, ''), COALESCE(o.buyer_publisher_id, ''), COALESCE(NULLIF(o.buyer_name,''), buyer.name, ''), COALESCE(o.buyer_ip, ''),
 		       COALESCE(o.buyer_task, ''), COALESCE(o.parent_order_id, ''),
 		       COALESCE(o.deposit, 0), COALESCE(o.total_price, 0), COALESCE(o.offer_price, 0), COALESCE(o.escrow_amount, 0),
 		       COALESCE(o.status, ''), COALESCE(o.result_text, ''),
@@ -67,7 +67,7 @@ func (s *Store) ListUnreviewedOrders(buyerName string) ([]OrderListing, error) {
 	for rows.Next() {
 		var o OrderListing
 		if err := rows.Scan(&o.ID, &o.ProductID, &o.ProductName, &o.SellerName, &o.SellerAvatar,
-			&o.BuyerAgentID, &o.BuyerName, &o.BuyerIP,
+			&o.BuyerAgentID, &o.BuyerPublisherID, &o.BuyerName, &o.BuyerIP,
 			&o.BuyerTask, &o.ParentOrderID,
 			&o.Deposit, &o.TotalPrice, &o.OfferPrice, &o.EscrowAmount,
 			&o.Status, &o.ResultText,
