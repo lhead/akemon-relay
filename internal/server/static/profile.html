@@ -63,6 +63,31 @@ nav { position: sticky; top: 0; z-index: 100; background: rgba(255,255,255,0.85)
 #terminal-container .xterm-char-measure-element { box-sizing: content-box !important; }
 #terminal-container .xterm { padding: 4px; height: 100%; }
 
+/* xterm.js — task stream viewer (same reset as terminal-container) */
+#live-task-viewer .xterm,
+#live-task-viewer .xterm-viewport,
+#live-task-viewer .xterm-screen,
+#live-task-viewer .xterm-helper-textarea,
+#live-task-viewer .xterm-rows,
+#live-task-viewer .xterm-char-measure-element { box-sizing: content-box !important; }
+#live-task-viewer .xterm { padding: 4px; height: 100%; }
+
+/* Live Tasks */
+.live-tasks-list { display: flex; flex-direction: column; }
+.live-task-row { display: flex; align-items: center; gap: 10px; padding: 10px 16px; cursor: pointer; transition: background 0.1s; }
+.live-task-row:hover { background: #fafafa; }
+.live-task-row.selected { background: #f0f7ff; }
+.live-task-row + .live-task-row { box-shadow: rgba(0,0,0,0.06) 0px -1px 0px; }
+.live-task-id { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #333; flex-shrink: 0; min-width: 100px; }
+.live-task-origin { padding: 1px 7px; border-radius: 9999px; font-size: 11px; font-weight: 500; flex-shrink: 0; }
+.live-task-cmd { font-size: 12px; color: #666; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: 'JetBrains Mono', monospace; }
+.live-task-dur { font-size: 11px; color: #bbb; flex-shrink: 0; font-feature-settings: "tnum"; min-width: 36px; text-align: right; }
+.live-task-status { font-size: 11px; font-weight: 500; padding: 1px 8px; border-radius: 9999px; flex-shrink: 0; }
+.live-task-status.running { background: #f0fdf4; color: #16a34a; }
+.live-task-status.done-ok { background: #f5f5f5; color: #888; }
+.live-task-status.done-err { background: #fff5f5; color: #dc2626; }
+.live-task-statusbar { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #aaa; margin-top: 6px; padding: 0 2px; }
+
 /* Card */
 .card { background: #fff; border-radius: 8px; box-shadow: rgba(0,0,0,0.08) 0px 0px 0px 1px, rgba(0,0,0,0.04) 0px 2px 2px, #fafafa 0px 0px 0px 1px inset; }
 
@@ -292,7 +317,13 @@ function unescapeHtml(s) {
   return ta.value;
 }
 
+var activeTab = null;
+
 function switchTab(name) {
+  // Tab leave lifecycle
+  if (activeTab === 'live-tasks' && name !== 'live-tasks') liveTasksOnLeave();
+  if (activeTab === 'terminal' && name !== 'terminal' && termWs) disconnectTerminal();
+
   document.querySelectorAll('.tab-btn').forEach(function(b) {
     b.classList.toggle('active', b.dataset.tab === name);
   });
@@ -300,6 +331,10 @@ function switchTab(name) {
     p.classList.toggle('active', p.id === 'tab-' + name);
   });
   location.hash = name;
+  activeTab = name;
+
+  // Tab enter lifecycle
+  if (name === 'live-tasks') liveTasksOnEnter();
 }
 
 function renderPage(a) {
@@ -328,6 +363,7 @@ function renderPage(a) {
   tabs.push({id:'profile', label:'Profile'});
   tabs.push({id:'chat', label:'Chat'});
   tabs.push({id:'terminal', label:'Terminal'});
+  tabs.push({id:'live-tasks', label:'Live Tasks'});
   tabs.push({id:'games', label:'Games'});
   tabs.push({id:'library', label:'Library'});
 
@@ -489,6 +525,13 @@ function renderPage(a) {
   h += '<button id="term-connect-btn" class="chat-send" onclick="toggleTerminal()" style="padding:6px 16px;">Connect</button>';
   h += '</div>';
   h += '<div id="terminal-container" style="width:100%;height:500px;background:#1a1a2e;border-radius:8px;overflow:hidden;"></div>';
+  h += '</div>';
+
+  // Live Tasks tab
+  h += '<div id="tab-live-tasks" class="tab-panel">';
+  h += '<div id="live-tasks-list-area"><div class="empty-state">Loading tasks...</div></div>';
+  h += '<div id="live-task-viewer" style="display:none;margin-top:16px;width:100%;height:420px;background:#1a1a2e;border-radius:8px;overflow:hidden;"></div>';
+  h += '<div class="live-task-statusbar" id="live-task-statusbar" style="display:none"></div>';
   h += '</div>';
 
   // Games tab
@@ -1026,6 +1069,184 @@ function disconnectTerminal() {
   if (term) { term.dispose(); term = null; termFitAddon = null; }
   var btn = document.getElementById('term-connect-btn');
   if (btn) { btn.textContent = 'Connect'; btn.disabled = false; }
+}
+
+// ---------------------------------------------------------------------------
+// Live Tasks tab
+// ---------------------------------------------------------------------------
+
+var liveTasksPollTimer = null;
+var liveTaskWs = null;
+var liveTaskTerm = null;
+var liveTaskFitAddon = null;
+var liveTaskResizeObserver = null;
+var currentViewingTaskId = null;
+
+var ORIGIN_COLORS = {
+  platform: '#60a5fa',
+  user_manual: '#a78bfa',
+  agent_call: '#4ade80',
+};
+
+function liveTaskOriginStyle(origin) {
+  var c = ORIGIN_COLORS[origin] || '#94a3b8';
+  return 'background:' + c + '18;color:' + c;
+}
+
+function fmtDuration(ms) {
+  if (ms == null || ms < 0) return '';
+  var s = Math.floor(ms / 1000);
+  if (s < 60) return s + 's';
+  return Math.floor(s / 60) + 'm' + (s % 60) + 's';
+}
+
+function loadLiveTasks() {
+  var token = getToken();
+  fetch('/v1/agent/' + encodeURIComponent(AGENT_NAME) + '/live-tasks?include_finished=true', {
+    headers: { 'Authorization': 'Bearer ' + token }
+  })
+  .then(function(r) {
+    if (!r.ok) throw new Error('status ' + r.status);
+    return r.json();
+  })
+  .then(function(tasks) {
+    renderLiveTasksList(tasks || []);
+  })
+  .catch(function() {
+    var sec = document.getElementById('live-tasks-list-area');
+    if (sec) sec.innerHTML = '<div class="empty-state">Could not load tasks — owner login required.</div>';
+  });
+}
+
+function renderLiveTasksList(tasks) {
+  var sec = document.getElementById('live-tasks-list-area');
+  if (!sec) return;
+  if (!tasks.length) {
+    sec.innerHTML = '<div class="empty-state">No tasks in the last hour.</div>';
+    return;
+  }
+  var h = '<div class="card live-tasks-list">';
+  tasks.forEach(function(t) {
+    var isRunning = t.status === 'running';
+    var exitOk = t.exit_code == null || t.exit_code === 0;
+    var statusCls = isRunning ? 'running' : (exitOk ? 'done-ok' : 'done-err');
+    var statusLabel = isRunning ? '● running' : ('exit ' + (t.exit_code != null ? t.exit_code : '?'));
+    var selected = (t.task_id === currentViewingTaskId) ? ' selected' : '';
+    var dur = isRunning ? fmtDuration(t.duration_ms) : (fmtDuration(t.duration_ms) || fmtTime(t.started_at));
+    h += '<div class="live-task-row' + selected + '" onclick="openLiveTaskViewer(\'' + esc(t.task_id) + '\')">';
+    h += '<span class="live-task-id">' + esc(t.task_id.slice(0, 12)) + '</span>';
+    if (t.origin) h += '<span class="live-task-origin" style="' + liveTaskOriginStyle(t.origin) + '">' + esc(t.origin) + '</span>';
+    if (t.cmd) h += '<span class="live-task-cmd">' + esc(t.cmd) + '</span>';
+    h += '<span class="live-task-dur">' + esc(dur) + '</span>';
+    h += '<span class="live-task-status ' + statusCls + '">' + statusLabel + '</span>';
+    h += '</div>';
+  });
+  h += '</div>';
+  sec.innerHTML = h;
+}
+
+function openLiveTaskViewer(taskId) {
+  if (currentViewingTaskId === taskId) return;
+  closeLiveTaskViewer(true /* keepList */);
+
+  currentViewingTaskId = taskId;
+  loadLiveTasks(); // re-render list to show selection
+
+  var container = document.getElementById('live-task-viewer');
+  var statusBar = document.getElementById('live-task-statusbar');
+  if (!container) return;
+
+  container.style.display = 'block';
+  container.innerHTML = '';
+  if (statusBar) { statusBar.style.display = 'block'; statusBar.textContent = 'Connecting...'; }
+
+  liveTaskTerm = new Terminal({
+    cursorBlink: false,
+    fontSize: 13,
+    fontFamily: "'JetBrains Mono', monospace",
+    theme: { background: '#1a1a2e', foreground: '#e0e0e0', cursor: '#0072f5' },
+    disableStdin: true,
+    scrollback: 5000,
+  });
+  liveTaskFitAddon = new FitAddon.FitAddon();
+  liveTaskTerm.loadAddon(liveTaskFitAddon);
+  liveTaskTerm.open(container);
+  requestAnimationFrame(function() { try { liveTaskFitAddon.fit(); } catch(e) {} });
+
+  liveTaskResizeObserver = new ResizeObserver(function() {
+    if (liveTaskFitAddon) { try { liveTaskFitAddon.fit(); } catch(e) {} }
+  });
+  liveTaskResizeObserver.observe(container);
+
+  var token = getToken();
+  var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  var wsUrl = proto + '//' + location.host + '/v1/live/task/' + encodeURIComponent(taskId) + '/stream?token=' + encodeURIComponent(token);
+
+  var wsOpened = false;
+  liveTaskWs = new WebSocket(wsUrl);
+
+  liveTaskWs.onopen = function() {
+    wsOpened = true;
+    if (statusBar) statusBar.textContent = 'Streaming…';
+  };
+
+  liveTaskWs.onmessage = function(e) {
+    try {
+      var msg = JSON.parse(e.data);
+      if (msg.type === 'task_stream' && msg.chunk) {
+        if (msg.stream === 'stderr') {
+          liveTaskTerm.write('\x1b[33m' + msg.chunk + '\x1b[0m');
+        } else {
+          liveTaskTerm.write(msg.chunk);
+        }
+      } else if (msg.type === 'task_end') {
+        var ec = msg.exit_code;
+        var dur = fmtDuration(msg.duration_ms);
+        var color = (ec === 0 || ec == null) ? '\x1b[90m' : '\x1b[31m';
+        liveTaskTerm.write('\r\n' + color + '─── task ended · exit=' + (ec != null ? ec : '?') + (dur ? ' · ' + dur : '') + ' ───\x1b[0m\r\n');
+        if (statusBar) statusBar.textContent = 'Task ended (exit=' + (ec != null ? ec : '?') + (dur ? ', ' + dur : '') + ')';
+        liveTaskWs = null; // server will close; terminal stays visible
+        loadLiveTasks();   // refresh list to show final status
+      }
+    } catch(ex) {}
+  };
+
+  liveTaskWs.onerror = function() {
+    if (liveTaskTerm) liveTaskTerm.write('\x1b[31mWebSocket error\x1b[0m\r\n');
+    if (statusBar) statusBar.textContent = 'Connection error';
+  };
+
+  liveTaskWs.onclose = function(e) {
+    if (liveTaskWs !== null) { // unexpected close (task_end sets it to null before close)
+      var reason = e.reason || (wsOpened ? 'disconnected' : 'stream expired');
+      if (liveTaskTerm) liveTaskTerm.write('\x1b[31m' + reason + '\x1b[0m\r\n');
+      if (statusBar) statusBar.textContent = reason;
+      liveTaskWs = null;
+    }
+  };
+}
+
+function closeLiveTaskViewer(keepList) {
+  if (liveTaskResizeObserver) { liveTaskResizeObserver.disconnect(); liveTaskResizeObserver = null; }
+  if (liveTaskWs) { try { liveTaskWs.close(); } catch(e) {} liveTaskWs = null; }
+  if (liveTaskTerm) { liveTaskTerm.dispose(); liveTaskTerm = null; liveTaskFitAddon = null; }
+  if (!keepList) currentViewingTaskId = null;
+  var container = document.getElementById('live-task-viewer');
+  if (container) container.style.display = 'none';
+  var statusBar = document.getElementById('live-task-statusbar');
+  if (statusBar) statusBar.style.display = 'none';
+}
+
+function liveTasksOnEnter() {
+  loadLiveTasks(); // immediate first load
+  if (!liveTasksPollTimer) {
+    liveTasksPollTimer = setInterval(loadLiveTasks, 3000);
+  }
+}
+
+function liveTasksOnLeave() {
+  if (liveTasksPollTimer) { clearInterval(liveTasksPollTimer); liveTasksPollTimer = null; }
+  closeLiveTaskViewer();
 }
 
 function load() {

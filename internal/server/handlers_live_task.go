@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/akemon/akemon-relay/internal/auth"
 	"github.com/akemon/akemon-relay/internal/relay"
 	"github.com/gorilla/websocket"
 )
@@ -41,7 +42,20 @@ func (s *Server) handleLiveTaskWebSocket(w http.ResponseWriter, r *http.Request)
 		jsonError(w, "stream expired", http.StatusNotFound)
 		return
 	}
-	if !s.authenticateAgentOwner(w, r, agent.Name) {
+
+	// Auth: accept token from query param (browser WebSocket can't set headers)
+	// or from Authorization header, same pattern as the terminal handler.
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		token = auth.ExtractBearer(r)
+	}
+	dbAgent, err := s.relay.Store.GetAgentByName(agent.Name)
+	if err != nil || dbAgent == nil {
+		jsonError(w, "agent not found", http.StatusNotFound)
+		return
+	}
+	if token == "" || !auth.VerifyToken(token, dbAgent.SecretHash) {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
 
