@@ -9,6 +9,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/css/xterm.css">
 <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/lib/xterm.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0/lib/addon-fit.js"></script>
@@ -156,6 +157,20 @@ nav { position: sticky; top: 0; z-index: 100; background: rgba(255,255,255,0.85)
 .btn-ctrl.danger:hover { border-color: #f87171; background: #fff5f5; }
 .ctrl-status { margin-top: 8px; font-size: 12px; text-align: center; min-height: 1.2em; color: #666; }
 
+/* Journal */
+.journal-list { display: flex; flex-direction: column; gap: 10px; }
+.journal-card { background: #fff; border-radius: 8px; box-shadow: rgba(0,0,0,0.06) 0px 0px 0px 1px; overflow: hidden; }
+.journal-head { display: flex; align-items: center; gap: 12px; padding: 14px 18px; cursor: pointer; transition: background 0.1s; }
+.journal-head:hover { background: #fafafa; }
+.journal-head-main { flex: 1; min-width: 0; }
+.journal-date { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 500; color: #808080; letter-spacing: 0.02em; }
+.journal-preview { font-size: 13px; color: #444; line-height: 1.55; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.journal-caret { font-size: 12px; color: #bbb; flex-shrink: 0; transition: transform 0.15s; }
+.journal-card.open .journal-caret { transform: rotate(180deg); }
+.journal-card.open .journal-preview { display: none; }
+.journal-body { padding: 0 18px 18px; font-size: 14px; line-height: 1.7; color: #262626; }
+.journal-body p:first-child { margin-top: 0; }
+
 /* Games & Library */
 .item-list { display: flex; flex-direction: column; gap: 1px; }
 .item-row { display: flex; align-items: center; gap: 12px; padding: 12px 20px; text-decoration: none; color: inherit; transition: background 0.1s; }
@@ -300,6 +315,16 @@ function esc(s) {
   return d.innerHTML;
 }
 
+// Render markdown from untrusted (LLM-generated) sources.
+// marked turns markdown into HTML; DOMPurify strips <script>, event handlers,
+// javascript: URIs, etc. Fallback to text if either library failed to load.
+function mdRender(raw) {
+  var src = raw == null ? '' : String(raw);
+  if (typeof marked === 'undefined') return '<pre>' + esc(src) + '</pre>';
+  var html = marked.parse(src);
+  return (typeof DOMPurify !== 'undefined') ? DOMPurify.sanitize(html) : html;
+}
+
 function spd(ms) {
   if (!ms) return '-';
   if (ms < 1000) return ms + 'ms';
@@ -365,6 +390,7 @@ function renderPage(a) {
   tabs.push({id:'terminal', label:'Terminal'});
   tabs.push({id:'live-tasks', label:'Live Tasks'});
   tabs.push({id:'games', label:'Games'});
+  tabs.push({id:'journal', label:'Journal'});
   tabs.push({id:'library', label:'Library'});
 
   h += '<div class="tab-nav">';
@@ -537,19 +563,22 @@ function renderPage(a) {
   // Games tab
   h += '<div id="tab-games" class="tab-panel"><div id="games-content"><div class="empty-state">Loading games...</div></div></div>';
 
+  // Journal tab
+  h += '<div id="tab-journal" class="tab-panel"><div id="journal-content"><div class="empty-state">Loading journal...</div></div></div>';
+
   // Library tab
   h += '<div id="tab-library" class="tab-panel"><div id="library-content"><div class="empty-state">Loading library...</div></div></div>';
 
   document.getElementById('page-content').innerHTML = h;
 
-  // Render markdown
-  if (a.self_intro && typeof marked !== 'undefined') {
+  // Render markdown (sanitized — see mdRender)
+  if (a.self_intro) {
     var el = document.getElementById('self-intro-md');
-    if (el) el.innerHTML = marked.parse(a.self_intro);
+    if (el) el.innerHTML = mdRender(a.self_intro);
   }
-  if (a.canvas && typeof marked !== 'undefined') {
+  if (a.canvas) {
     var el2 = document.getElementById('canvas-md');
-    if (el2) el2.innerHTML = marked.parse(a.canvas);
+    if (el2) el2.innerHTML = mdRender(a.canvas);
   }
 
   // Default tab
@@ -565,6 +594,7 @@ function renderPage(a) {
 
   loadProducts();
   loadGames();
+  loadJournal();
   loadLibrary();
   loadChat();
 }
@@ -660,6 +690,10 @@ function loadGames() {
   }).catch(function(){sec.innerHTML='<div class="empty-state">No games yet.</div>';});
 }
 
+function isJournalNote(n){
+  return !!(n && typeof n.content === 'string' && n.content.indexOf('<!-- journal -->') !== -1);
+}
+
 function loadLibrary() {
   var notes=[], pages=[];
   var done=0;
@@ -669,7 +703,10 @@ function loadLibrary() {
     var sec=document.getElementById('library-content');
     if(!sec)return;
     var items=[];
-    notes.forEach(function(n){items.push({type:'note',slug:n.slug,title:n.title,time:n.updated_at||n.created_at});});
+    notes.forEach(function(n){
+      if(isJournalNote(n))return;
+      items.push({type:'note',slug:n.slug,title:n.title,time:n.updated_at||n.created_at});
+    });
     pages.forEach(function(p){items.push({type:'page',slug:p.slug,title:p.title,time:p.updated_at||p.created_at});});
     if(!items.length){sec.innerHTML='<div class="empty-state">No notes or pages yet.</div>';return;}
     items.sort(function(a,b){return (b.time||'').localeCompare(a.time||'');});
@@ -691,6 +728,83 @@ function loadLibrary() {
   .then(function(r){return r.json();}).then(function(d){notes=d||[];merge();}).catch(function(){merge();});
   fetch('/v1/agent/'+encodeURIComponent(AGENT_NAME)+'/pages')
   .then(function(r){return r.json();}).then(function(d){pages=d||[];merge();}).catch(function(){merge();});
+}
+
+// Strip "# date" heading and "<!-- journal -->" marker from the raw note content
+// so the journal viewer renders only the body.
+function stripJournalHeader(content){
+  if(!content)return '';
+  var s = content.replace(/^#\s+[^\n]*\n?/, '');
+  s = s.replace(/^\s*<!--\s*journal\s*-->\s*\n?/, '');
+  return s.replace(/^\s+/, '');
+}
+
+// Plain-text preview of a journal entry: strip markdown syntax, collapse whitespace, truncate.
+function journalPreview(body, max){
+  var s = (body||'')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/^\s*>+\s?/gm, '')
+    .replace(/^\s{0,3}#+\s*/gm, '')
+    .replace(/[*_~]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  var lim = max || 120;
+  if (s.length > lim) s = s.slice(0, lim).replace(/\s+\S*$/, '') + '…';
+  return s;
+}
+
+var journalBodies = [];
+
+function loadJournal(){
+  var sec=document.getElementById('journal-content');
+  if(!sec)return;
+  fetch('/v1/agent/'+encodeURIComponent(AGENT_NAME)+'/notes')
+  .then(function(r){return r.json();})
+  .then(function(d){
+    var entries=(d||[]).filter(isJournalNote);
+    if(!entries.length){sec.innerHTML='<div class="empty-state">No journal entries yet.</div>';return;}
+    // Sort by slug desc — slugs are YYYY-MM-DD dates, so lexicographic order = chronological.
+    entries.sort(function(a,b){return (b.slug||'').localeCompare(a.slug||'');});
+    journalBodies = entries.map(function(n){return stripJournalHeader(n.content);});
+    var h='<div class="journal-list">';
+    entries.forEach(function(n,i){
+      var preview=journalPreview(journalBodies[i],140);
+      var date=n.slug||'';
+      h+='<div class="journal-card" data-idx="'+i+'">';
+      h+='<div class="journal-head" onclick="toggleJournal('+i+')">';
+      h+='<div class="journal-head-main">';
+      h+='<div class="journal-date">'+esc(date)+'</div>';
+      h+='<div class="journal-preview">'+esc(preview)+'</div>';
+      h+='</div>';
+      h+='<div class="journal-caret">\u25BE</div>';
+      h+='</div>';
+      h+='<div class="journal-body md-content" id="journal-body-'+i+'" style="display:none"></div>';
+      h+='</div>';
+    });
+    h+='</div>';
+    sec.innerHTML=h;
+  })
+  .catch(function(){sec.innerHTML='<div class="empty-state">Failed to load journal.</div>';});
+}
+
+function toggleJournal(i){
+  var card=document.querySelector('.journal-card[data-idx="'+i+'"]');
+  if(!card)return;
+  var body=document.getElementById('journal-body-'+i);
+  if(!body)return;
+  var open=card.classList.toggle('open');
+  if(open){
+    if(!body.dataset.rendered){
+      body.innerHTML=mdRender(journalBodies[i]||'');
+      body.dataset.rendered='1';
+    }
+    body.style.display='block';
+  } else {
+    body.style.display='none';
+  }
 }
 
 var chatConvId = null;
@@ -1126,14 +1240,14 @@ function renderLiveTasksList(tasks) {
     return;
   }
   var h = '<div class="card live-tasks-list">';
-  tasks.forEach(function(t) {
+  tasks.forEach(function(t, i) {
     var isRunning = t.status === 'running';
     var exitOk = t.exit_code == null || t.exit_code === 0;
     var statusCls = isRunning ? 'running' : (exitOk ? 'done-ok' : 'done-err');
     var statusLabel = isRunning ? '● running' : ('exit ' + (t.exit_code != null ? t.exit_code : '?'));
     var selected = (t.task_id === currentViewingTaskId) ? ' selected' : '';
     var dur = isRunning ? fmtDuration(t.duration_ms) : (fmtDuration(t.duration_ms) || fmtTime(t.started_at));
-    h += '<div class="live-task-row' + selected + '" onclick="openLiveTaskViewer(\'' + esc(t.task_id) + '\')">';
+    h += '<div class="live-task-row' + selected + '" data-task-idx="' + i + '">';
     h += '<span class="live-task-id">' + esc(t.task_id.slice(0, 12)) + '</span>';
     if (t.origin) h += '<span class="live-task-origin" style="' + liveTaskOriginStyle(t.origin) + '">' + esc(t.origin) + '</span>';
     if (t.cmd) h += '<span class="live-task-cmd">' + esc(t.cmd) + '</span>';
@@ -1143,6 +1257,15 @@ function renderLiveTasksList(tasks) {
   });
   h += '</div>';
   sec.innerHTML = h;
+  // Wire click handlers via per-row closures — never interpolate task_id into attribute strings.
+  var rows = sec.querySelectorAll('.live-task-row');
+  tasks.forEach(function(t, i) {
+    if (rows[i]) {
+      rows[i].addEventListener('click', function() {
+        if (t && t.task_id) openLiveTaskViewer(t.task_id);
+      });
+    }
+  });
 }
 
 function openLiveTaskViewer(taskId) {
@@ -1182,28 +1305,37 @@ function openLiveTaskViewer(taskId) {
   var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   var wsUrl = proto + '//' + location.host + '/v1/live/task/' + encodeURIComponent(taskId) + '/stream?token=' + encodeURIComponent(token);
 
+  // Capture this session's WS + terminal via closure. Callbacks fire asynchronously and
+  // may arrive after the user has switched to another task, by which time liveTaskWs /
+  // liveTaskTerm already point at a different session. The `liveTaskWs === thisWs` guard
+  // ensures stale callbacks never write to the new terminal or null out the new ws ref.
   var wsOpened = false;
-  liveTaskWs = new WebSocket(wsUrl);
+  var wsErrored = false;
+  var thisWs = new WebSocket(wsUrl);
+  var thisTerm = liveTaskTerm;
+  liveTaskWs = thisWs;
 
-  liveTaskWs.onopen = function() {
+  thisWs.onopen = function() {
+    if (liveTaskWs !== thisWs) return;
     wsOpened = true;
     if (statusBar) statusBar.textContent = 'Streaming…';
   };
 
-  liveTaskWs.onmessage = function(e) {
+  thisWs.onmessage = function(e) {
+    if (liveTaskWs !== thisWs) return;
     try {
       var msg = JSON.parse(e.data);
       if (msg.type === 'task_stream' && msg.chunk) {
         if (msg.stream === 'stderr') {
-          liveTaskTerm.write('\x1b[33m' + msg.chunk + '\x1b[0m');
+          thisTerm.write('\x1b[33m' + msg.chunk + '\x1b[0m');
         } else {
-          liveTaskTerm.write(msg.chunk);
+          thisTerm.write(msg.chunk);
         }
       } else if (msg.type === 'task_end') {
         var ec = msg.exit_code;
         var dur = fmtDuration(msg.duration_ms);
         var color = (ec === 0 || ec == null) ? '\x1b[90m' : '\x1b[31m';
-        liveTaskTerm.write('\r\n' + color + '─── task ended · exit=' + (ec != null ? ec : '?') + (dur ? ' · ' + dur : '') + ' ───\x1b[0m\r\n');
+        thisTerm.write('\r\n' + color + '─── task ended · exit=' + (ec != null ? ec : '?') + (dur ? ' · ' + dur : '') + ' ───\x1b[0m\r\n');
         if (statusBar) statusBar.textContent = 'Task ended (exit=' + (ec != null ? ec : '?') + (dur ? ', ' + dur : '') + ')';
         liveTaskWs = null; // server will close; terminal stays visible
         loadLiveTasks();   // refresh list to show final status
@@ -1211,18 +1343,22 @@ function openLiveTaskViewer(taskId) {
     } catch(ex) {}
   };
 
-  liveTaskWs.onerror = function() {
-    if (liveTaskTerm) liveTaskTerm.write('\x1b[31mWebSocket error\x1b[0m\r\n');
+  thisWs.onerror = function() {
+    if (liveTaskWs !== thisWs) return;
+    wsErrored = true;
+    if (thisTerm) thisTerm.write('\x1b[31mWebSocket error\x1b[0m\r\n');
     if (statusBar) statusBar.textContent = 'Connection error';
   };
 
-  liveTaskWs.onclose = function(e) {
-    if (liveTaskWs !== null) { // unexpected close (task_end sets it to null before close)
+  thisWs.onclose = function(e) {
+    if (liveTaskWs !== thisWs) return;
+    // Suppress the second red line when onerror already logged — browsers fire both on net errors.
+    if (!wsErrored) {
       var reason = e.reason || (wsOpened ? 'disconnected' : 'stream expired');
-      if (liveTaskTerm) liveTaskTerm.write('\x1b[31m' + reason + '\x1b[0m\r\n');
+      if (thisTerm) thisTerm.write('\x1b[31m' + reason + '\x1b[0m\r\n');
       if (statusBar) statusBar.textContent = reason;
-      liveTaskWs = null;
     }
+    liveTaskWs = null;
   };
 }
 

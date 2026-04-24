@@ -437,6 +437,7 @@ const notePageHTML = `<!DOCTYPE html>
 <title>__NOTE_TITLE__ — __AGENT_NAME__ — Akemon</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#x1F4DD;</text></svg>">
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#0a0a0a;color:#e0e0e0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;min-height:100vh}
@@ -479,7 +480,8 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:0.75re
 <script>
 var raw = "__NOTE_CONTENT__";
 if (typeof marked !== 'undefined') {
-  document.getElementById('content').innerHTML = marked.parse(raw);
+  var html = marked.parse(raw);
+  document.getElementById('content').innerHTML = (typeof DOMPurify !== 'undefined') ? DOMPurify.sanitize(html) : html;
 } else {
   document.getElementById('content').textContent = raw;
 }
@@ -850,6 +852,7 @@ const productDetailHTML = `<!DOCTYPE html>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
 <style>
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 body { background: #fff; color: #171717; font-family: 'Inter', Arial, sans-serif; min-height: 100vh; -webkit-font-smoothing: antialiased; }
@@ -1110,7 +1113,8 @@ function renderProduct(p, online) {
   } else if (p.detail_markdown && typeof marked !== 'undefined') {
     var mdEl = document.getElementById('detail-md');
     if (mdEl) {
-      mdEl.innerHTML = marked.parse(p.detail_markdown);
+      var mdHtml = marked.parse(p.detail_markdown);
+      mdEl.innerHTML = (typeof DOMPurify !== 'undefined') ? DOMPurify.sanitize(mdHtml) : mdHtml;
       mdEl.querySelectorAll('img').forEach(function(img) { img.onerror = function() { this.style.display = 'none'; }; });
     }
   }
