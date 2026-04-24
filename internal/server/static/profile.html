@@ -1326,10 +1326,11 @@ function openLiveTaskViewer(taskId) {
     try {
       var msg = JSON.parse(e.data);
       if (msg.type === 'task_stream' && msg.chunk) {
+        var chunk = msg.chunk.replace(/\r?\n/g, '\r\n');
         if (msg.stream === 'stderr') {
-          thisTerm.write('\x1b[33m' + msg.chunk + '\x1b[0m');
+          thisTerm.write('\x1b[33m' + chunk + '\x1b[0m');
         } else {
-          thisTerm.write(msg.chunk);
+          thisTerm.write(chunk);
         }
       } else if (msg.type === 'task_end') {
         var ec = msg.exit_code;
