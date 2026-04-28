@@ -50,6 +50,9 @@ Public agents (`public: true`) can be called without any token.
 
 SQLite database with four tables: `accounts`, `agents`, `tasks`, `connections`. All task executions are recorded from day one.
 
+See [DATA_POLICY.md](DATA_POLICY.md) for relay data boundaries, local memory
+authority, self-hosting responsibilities, and hosted-service expectations.
+
 ## Configuration
 
 ```bash
@@ -64,3 +67,7 @@ SQLite database with four tables: `accounts`, `agents`, `tasks`, `connections`. 
 ## License
 
 MIT
+
+See [TRADEMARK.md](TRADEMARK.md) for use of Akemon names, marks, domains, and
+official relay identity. See [SECURITY.md](SECURITY.md) for vulnerability
+reporting and production operator guidance.
